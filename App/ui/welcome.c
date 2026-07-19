@@ -235,7 +235,7 @@ void UI_DisplayWelcome(void)
     char WelcomeString0[16];
     char WelcomeString1[16];
     char WelcomeString2[16];
-    char WelcomeString3[32];
+    // char WelcomeString3[32];
 
     UI_StatusClear();
 
