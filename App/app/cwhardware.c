@@ -46,8 +46,8 @@
 // Local state for last sampled paddles (edge detection)
 static bool     s_last_dit   = false;
 static bool     s_last_dah   = false;
-static uint32_t s_dit_count  = 0;  // consecutive raw-true reads for dit
-static uint32_t s_dah_count  = 0;  // consecutive raw-true reads for dah
+static uint32_t s_dit_count  = 0;  // consecutive raw reads disagreeing with confirmed dit state
+static uint32_t s_dah_count  = 0;  // consecutive raw reads disagreeing with confirmed dah state
 static bool     s_last_is_dah = false;  // which paddle was pressed most recently (for Ultimatic mode)
 
 // Read button ring input (SIDE1)
@@ -437,10 +437,14 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
         CW_ReadSideButton(&hw_ring);
     }
 
-    // Read port ring input if enabled and OR with button ring.
+    // Read port ring input if enabled and OR with button ring. PORT_GROUND is
+    // checked rather than PORT_RING so that Port Handkey mode (PORT_GROUND set,
+    // no PORT_RING flag of its own) also reads the ring contact as an alternate
+    // key input alongside tip (either pin active) - every mode that sets
+    // PORT_RING also sets PORT_GROUND, so this covers both cases.
     // Short-circuit: if SD1 already resolved true, skip the expensive heavy deglitch —
     // the OR result is the same and we avoid ~500us of sampling overhead on every poll.
-    if ((mode & CW_KEY_FLAG_PORT_RING) && !hw_ring) {
+    if ((mode & CW_KEY_FLAG_PORT_GROUND) && !hw_ring) {
         // New hardware: port-ring is on PA13 (SWDIO when not used). Use deglitch helper on GPIOA bit 13.
         hw_ring = CW_ReadGpioDeglitched(GPIOA, LL_GPIO_PIN_13, false);
     }
@@ -473,20 +477,26 @@ void CW_ReadKeys(CW_Input *in)
         n_dah = false;
     }
 
-    bool deb_dit, deb_dah;
+    bool deb_dit = s_last_dit;
+    bool deb_dah = s_last_dah;
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_USB_PORT) {
         // USB port paddle already went through its own tri-state glitch
         // filter. Honor the single read as-is.
         deb_dit = n_dit;
         deb_dah = n_dah;
     } else {
-        // Three-strike debounce: increment counter while raw line is active, reset on inactive.
-        if (n_dit) s_dit_count++; else s_dit_count = 0;
-        if (n_dah) s_dah_count++; else s_dah_count = 0;
+        // Symmetric three-strike debounce: counters track consecutive raw
+        // reads that *disagree* with the currently confirmed state, so press
+        // and release need the same three strikes to take effect. Any read
+        // that agrees with the confirmed state resets the counter (no
+        // penalty for a brief flicker back toward the current state).
+        // If we ever want press/release weighted differently, split this
+        // into separate thresholds per direction - kept equal for now.
+        if (n_dit == deb_dit) s_dit_count = 0;
+        else if (++s_dit_count >= 3) { deb_dit = n_dit; s_dit_count = 0; }
 
-        // Debounced state: line is considered active only after 3 consecutive hits.
-        deb_dit = (s_dit_count >= 3);
-        deb_dah = (s_dah_count >= 3);
+        if (n_dah == deb_dah) s_dah_count = 0;
+        else if (++s_dah_count >= 3) { deb_dah = n_dah; s_dah_count = 0; }
     }
 
     // Edges computed against previous debounced state.
@@ -616,6 +626,8 @@ void CW_HW_ResetKeySamples(void)
     s_last_dit   = false;
     s_last_dah   = false;
     s_last_is_dah = false;
+    s_dit_count  = 0;
+    s_dah_count  = 0;
 }
 
 
