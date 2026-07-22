@@ -131,8 +131,16 @@ static bool CW_ReadGpioDeglitched(GPIO_TypeDef *gpio_port, uint32_t pin_mask, bo
     }
 #if ENABLE_CW_HARDWARE_DEBUG
     char dbg_buf[80];
-        sprintf_(dbg_buf, "s=%u r=0x%08X m=%u r=%u\r\n", (unsigned)(i>=goal), (unsigned)reg, (unsigned)i, (unsigned)result);
-        UART_Send(dbg_buf, strlen(dbg_buf));
+    sprintf_(dbg_buf, "%s: s=%u r=0x%08X m=%u r=%u\r\n", label, (unsigned)(i>=goal), (unsigned)reg, (unsigned)i, (unsigned)result);
+    // UART_Send is a no-op here: USART1 (PA10) is disabled whenever
+    // CW_ConfigurePortGround(true) is active (Port Handkey and friends), which
+    // is exactly when this print is most useful. Route over USB CDC instead -
+    // it's untouched by any port-ground mode and cheap when nothing's listening.
+#ifdef ENABLE_USB
+    VCP_SendStr(dbg_buf);
+#else
+    UART_Send(dbg_buf, strlen(dbg_buf));
+#endif
 #endif
     return result;
 }
@@ -609,9 +617,11 @@ void CW_ConfigurePortRing(bool enable)
         LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
         LL_GPIO_SetPinMode(GPIOA, LL_GPIO_PIN_13, LL_GPIO_MODE_INPUT);
         LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_13, LL_GPIO_PULL_UP);
+        SET_BIT(SYSCFG->PAENS, LL_GPIO_PIN_13);     // enable glitch filter
     } else {
         // leave PA13 as SWDIO/default, but no pullup so it doesn't mess with the mic
         LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_13, LL_GPIO_PULL_NO);
+        CLEAR_BIT(SYSCFG->PAENS, LL_GPIO_PIN_13);   // restore a pristine pin for SWD
     }
 #if ENABLE_KEYER_DEBUG
     char buf[50];

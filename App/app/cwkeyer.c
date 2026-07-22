@@ -90,7 +90,13 @@ static uint16_t       s_elem_deadline_extra_ms = 0; // extra ms added to first-e
 static bool           s_active_is_dit = false;
 static bool           s_pending_alternate = false; // alternate element queued
 /* last sampled paddles moved to app/cwhardware.c */
-static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
+static bool           s_last_handkey_ptt = false; // last accepted/confirmed PTT state for handkey mode
+
+// Shared between handkey modes and bug dah handling
+static bool           s_handkey_release_pending = false; // true while waiting out the release debounce
+static uint32_t       s_handkey_release_pending_since_ms = 0; // millis() timestamp the release was first observed
+
+#define CW_HANDKEY_RELEASE_DEBOUNCE_MS 40
 
 // Macro playback state
 static char s_playback_buf[CW_MACRO_MAX_LEN * 2 + 1]; // decoded with spaces inserted
@@ -136,6 +142,8 @@ void CW_KeyerResetRuntime(void)
     s_active_is_dit = false;
     s_pending_alternate = false;
     s_last_handkey_ptt = false;
+    s_handkey_release_pending = false;
+    s_handkey_release_pending_since_ms = 0;
     s_bug_state = BUG_STATE_IDLE;
     s_bug_phase_start = 0;
 
@@ -598,12 +606,32 @@ CW_Action_t ptt_action(void)
         // (This branch is only reached for NO_KEYER modes - see the caller in
         // CW_HandleState - and USB_PORT is already handled above, so PORT_GROUND
         // alone is enough to identify Port Handkey mode here.)
-        bool tip = false, ring = false;
-        CW_ReadKeysForMode(gEeprom.CW_KEY_INPUT, &tip, &ring);
-        ptt = tip || ring;
+
+        // Go through CW_ReadKeys() rather than CW_ReadKeysForMode() directly -
+        // CW_ReadKeys() applies the cross-poll 3-strike debounce on top of the
+        // per-read deglitch.
+        CW_Input in = {0};
+        CW_ReadKeys(&in);
+        ptt = in.dit || in.dah;
     } else {
         // Read PTT button (PC5) via wrapper (active low)
         ptt = GPIO_IsPttPressed();
+    }
+
+    if (ptt) {
+        // Closed (on either pin) is trusted immediately - see rationale above.
+        s_handkey_release_pending = false;
+    } else {
+        // Both open. Don't believe it's a real release until it's held for
+        // the full window; a fresh closure before then (same pin re-bouncing,
+        // or the other pin taking over) cancels the pending release entirely.
+        if (!s_handkey_release_pending) {
+            s_handkey_release_pending = true;
+            s_handkey_release_pending_since_ms = millis();
+        }
+        if (millis_since(s_handkey_release_pending_since_ms) < CW_HANDKEY_RELEASE_DEBOUNCE_MS) {
+            ptt = s_last_handkey_ptt;
+        }
     }
 
     if (ptt && !s_last_handkey_ptt) {
@@ -684,11 +712,28 @@ static CW_Action_t CW_HandleBugState(void)
 
     case BUG_STATE_DAH_HOLD:
         if (in.dah) {
+            // Held (or re-closed before a pending release below was confirmed) -
+            // a fresh closure is always trusted immediately, same as ptt_action().
+            s_handkey_release_pending = false;
             return CW_ACTION_CARRIER_HOLD_ON;
         }
 
+        // Dah paddle reads open. Don't trust it as a real release until it's
+        // held for the full debounce window - same rationale and constant as
+        // ptt_action(): dah is a raw handkey on this same hardware, so it
+        // bounces the same way. Without this, a bounce chain reads as
+        // "released" on its first clean open sample, chopping one held dah
+        // into several short ones.
+        if (!s_handkey_release_pending) {
+            s_handkey_release_pending = true;
+            s_handkey_release_pending_since_ms = now;
+        }
+        if (millis_since(s_handkey_release_pending_since_ms) < CW_HANDKEY_RELEASE_DEBOUNCE_MS) {
+            return CW_ACTION_CARRIER_HOLD_ON;
+        }
+        s_handkey_release_pending = false;
+
         if(millis_since(s_bug_phase_start) >= (uint32_t)s_gap_count) {
-            // only encode the non-glitchy elements
             CW_EncoderProcessElement(CW_ELEMENT_DAH);
         }
 
