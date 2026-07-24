@@ -480,11 +480,20 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
         // 1FF0..0x1FF7
         // TODO: address TBD
         PY25Q16_ReadBuffer(0x00A158, Data, 8);
-        const uint8_t set_ptt_scn = Data[7] & 0x0F;
+        const uint8_t set_ptt_scn_sav = Data[7] & 0x0F;
+        const bool set_ptt_scn_sav_erased = Data[7] == 0xFF;
+#ifdef ENABLE_FEAT_F4HWN_LOGO_SAV
+        const bool set_ptt_scn_sav_valid = !set_ptt_scn_sav_erased && set_ptt_scn_sav < (SET_SAV_LEN << 2);
+#else
+        const bool set_ptt_scn_sav_valid = !set_ptt_scn_sav_erased && set_ptt_scn_sav < 4;
+#endif
         gSetting_set_pwr = (((Data[7] & 0xF0) >> 4) < 7) ? ((Data[7] & 0xF0) >> 4) : 0;
-        gSetting_set_ptt = (set_ptt_scn < 4) ? (set_ptt_scn & 0x01) : 0;
+        gSetting_set_ptt = set_ptt_scn_sav_valid ? (set_ptt_scn_sav & 0x01) : 0;
 #ifdef ENABLE_FEAT_F4HWN_SCAN_FASTER
-        gSetting_set_scn = (set_ptt_scn < 4) ? ((set_ptt_scn & 0x02) == 0) : 1;
+        gSetting_set_scn = set_ptt_scn_sav_valid ? ((set_ptt_scn_sav & 0x02) == 0) : 0;
+#endif
+#ifdef ENABLE_FEAT_F4HWN_LOGO_SAV
+        gSetting_set_sav = set_ptt_scn_sav_valid ? ((set_ptt_scn_sav >> 2) & 0x03) : SET_SAV_OFF;
 #endif
 
         gSetting_set_tot = (((Data[6] & 0xF0) >> 4) < 4) ? ((Data[6] & 0xF0) >> 4) : 0;
@@ -494,7 +503,6 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
         int tmp = ((Data[5] & 0xF0) >> 4);
 
         gSetting_set_inv = (((tmp >> 0) & 0x01) < 2) ? ((tmp >> 0) & 0x01): 0;
-        gSetting_set_lck = (((tmp >> 1) & 0x01) < 2) ? ((tmp >> 1) & 0x01): 0;
         gSetting_set_met = (((tmp >> 2) & 0x01) < 2) ? ((tmp >> 2) & 0x01): 0;
         gSetting_set_gui = (((tmp >> 3) & 0x01) < 2) ? ((tmp >> 3) & 0x01): 0;
         gSetting_set_ctr = (((Data[5] & 0x0F)) > 00 && ((Data[5] & 0x0F)) < 16) ? ((Data[5] & 0x0F)) : 10;
@@ -509,7 +517,7 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 #else
         gSetting_set_inv = 0;
 #endif
-        gSetting_set_lck = (tmp >> 1) & 0x01;
+        gSetting_set_lck = (Data[2] < SET_LCK_LEN) ? Data[2] : SET_LCK_KEYS;
         gSetting_set_met = (tmp >> 2) & 0x01;
         gSetting_set_gui = (tmp >> 3) & 0x01;
 
@@ -527,7 +535,6 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 
         // And set special session settings for actions
         gSetting_set_ptt_session = gSetting_set_ptt;
-        gEeprom.KEY_LOCK_PTT = gSetting_set_lck;
     #endif
 }
 
@@ -1151,8 +1158,6 @@ void SETTINGS_SaveSettings(void)
 
     if(gSetting_set_inv == 1)
         tmp = tmp | (1 << 0);
-    if (gSetting_set_lck == 1)
-        tmp = tmp | (1 << 1);
     if (gSetting_set_met == 1)
         tmp = tmp | (1 << 2);
     if (gSetting_set_gui == 1)
@@ -1166,21 +1171,22 @@ void SETTINGS_SaveSettings(void)
 #endif
 
     tmp =   (gSetting_set_inv << 0) |
-            (gSetting_set_lck << 1) |
             (gSetting_set_met << 2) |
             (gSetting_set_gui << 3);
 
+    State[2] = gSetting_set_lck;
     State[5] = ((tmp << 4) | (gSetting_set_ctr & 0x0F));
     State[6] = ((gSetting_set_tot << 4) | (gSetting_set_eot & 0x0F));
-    uint8_t set_ptt_scn = gSetting_set_ptt & 0x01;
+    uint8_t set_ptt_scn_sav = gSetting_set_ptt & 0x01;
 #ifdef ENABLE_FEAT_F4HWN_SCAN_FASTER
     if (!gSetting_set_scn)
-        set_ptt_scn |= 0x02;
+        set_ptt_scn_sav |= 0x02;
+#endif
+#ifdef ENABLE_FEAT_F4HWN_LOGO_SAV
+    set_ptt_scn_sav |= (gSetting_set_sav & 0x03) << 2;
 #endif
 
-    State[7] = ((gSetting_set_pwr << 4) | set_ptt_scn);
-
-    gEeprom.KEY_LOCK_PTT = gSetting_set_lck;
+    State[7] = ((gSetting_set_pwr << 4) | set_ptt_scn_sav);
 
     PY25Q16_WriteBuffer(0x00A158, SecBuf, 8, false);
 #endif
