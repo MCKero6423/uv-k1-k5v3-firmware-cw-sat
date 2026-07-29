@@ -29,6 +29,12 @@ jobs:
         TAG=${{ github.ref_name }}
         cp build/CW/nr7y.cw.bin nr7y.k1-k5v3.${TAG}.bin
         cp build/CW/nr7y.cw.uf2 nr7y.k1-k5v3.${TAG}.uf2
+        # Ship the CHIRP module named for this firmware release, with its
+        # version string stamped to match. The module is stored generically
+        # in the repo (chirp/nr7y.k1-k5v3.chirp.py); the version lives only in
+        # the released copy so the two never drift.
+        cp chirp/nr7y.k1-k5v3.chirp.py nr7y.k1-k5v3.chirp.${TAG}.py
+        sed -i "s/@NR7Y_VERSION@/${TAG}/g" nr7y.k1-k5v3.chirp.${TAG}.py
 
     - name: Upload release artifacts
       uses: softprops/action-gh-release@v2
@@ -37,4 +43,4 @@ jobs:
         files: |
           nr7y.k1-k5v3.${{ github.ref_name }}.bin
           nr7y.k1-k5v3.${{ github.ref_name }}.uf2
-          chirp/fusion.nr7y.chirp.v1.2.py
+          nr7y.k1-k5v3.chirp.${{ github.ref_name }}.py
