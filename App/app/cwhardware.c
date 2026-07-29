@@ -493,18 +493,25 @@ void CW_ReadKeys(CW_Input *in)
         deb_dit = n_dit;
         deb_dah = n_dah;
     } else {
-        // Symmetric three-strike debounce: counters track consecutive raw
-        // reads that *disagree* with the currently confirmed state, so press
-        // and release need the same three strikes to take effect. Any read
-        // that agrees with the confirmed state resets the counter (no
-        // penalty for a brief flicker back toward the current state).
-        // If we ever want press/release weighted differently, split this
-        // into separate thresholds per direction - kept equal for now.
-        if (n_dit == deb_dit) s_dit_count = 0;
-        else if (++s_dit_count >= 3) { deb_dit = n_dit; s_dit_count = 0; }
+        // Asymmetric debounce: a press must be confirmed by three consecutive
+        // raw reads (glitch immunity on key-down), but a release takes effect
+        // on the first raw-open read so the iambic FSM sees paddle-open
+        // promptly. A symmetric release delay here starves the count-based
+        // debounce in the iambic path (CW_ReadKeys is skipped while
+        // s_pending_alternate is set) and makes mode B re-latch the still-high
+        // level into extra trailing elements. The straight-key/bug modes that
+        // want a release glitch-filter apply their own 40ms release debounce
+        // in cwkeyer.c and do not depend on this. Any read that agrees with
+        // the confirmed state resets the counter.
+        if (n_dit == deb_dit)   s_dit_count = 0;                 // agrees: no change
+        else if (!deb_dit) {                                     // rising: three-strike
+            if (++s_dit_count >= 3) { deb_dit = true; s_dit_count = 0; }
+        } else { deb_dit = false; s_dit_count = 0; }             // falling: immediate
 
-        if (n_dah == deb_dah) s_dah_count = 0;
-        else if (++s_dah_count >= 3) { deb_dah = n_dah; s_dah_count = 0; }
+        if (n_dah == deb_dah)   s_dah_count = 0;
+        else if (!deb_dah) {
+            if (++s_dah_count >= 3) { deb_dah = true; s_dah_count = 0; }
+        } else { deb_dah = false; s_dah_count = 0; }
     }
 
     // Edges computed against previous debounced state.
@@ -617,11 +624,9 @@ void CW_ConfigurePortRing(bool enable)
         LL_IOP_GRP1_EnableClock(LL_IOP_GRP1_PERIPH_GPIOA);
         LL_GPIO_SetPinMode(GPIOA, LL_GPIO_PIN_13, LL_GPIO_MODE_INPUT);
         LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_13, LL_GPIO_PULL_UP);
-        SET_BIT(SYSCFG->PAENS, LL_GPIO_PIN_13);     // enable glitch filter
     } else {
         // leave PA13 as SWDIO/default, but no pullup so it doesn't mess with the mic
         LL_GPIO_SetPinPull(GPIOA, LL_GPIO_PIN_13, LL_GPIO_PULL_NO);
-        CLEAR_BIT(SYSCFG->PAENS, LL_GPIO_PIN_13);   // restore a pristine pin for SWD
     }
 #if ENABLE_KEYER_DEBUG
     char buf[50];
