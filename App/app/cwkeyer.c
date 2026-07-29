@@ -90,7 +90,13 @@ static uint16_t       s_elem_deadline_extra_ms = 0; // extra ms added to first-e
 static bool           s_active_is_dit = false;
 static bool           s_pending_alternate = false; // alternate element queued
 /* last sampled paddles moved to app/cwhardware.c */
-static bool           s_last_handkey_ptt = false; // last PTT state for handkey mode
+static bool           s_last_handkey_ptt = false; // last accepted/confirmed PTT state for handkey mode
+
+// Shared between handkey modes and bug dah handling
+static bool           s_handkey_release_pending = false; // true while waiting out the release debounce
+static uint32_t       s_handkey_release_pending_since_ms = 0; // millis() timestamp the release was first observed
+
+#define CW_HANDKEY_RELEASE_DEBOUNCE_MS 40
 
 // Macro playback state
 static char s_playback_buf[CW_MACRO_MAX_LEN * 2 + 1]; // decoded with spaces inserted
@@ -136,6 +142,8 @@ void CW_KeyerResetRuntime(void)
     s_active_is_dit = false;
     s_pending_alternate = false;
     s_last_handkey_ptt = false;
+    s_handkey_release_pending = false;
+    s_handkey_release_pending_since_ms = 0;
     s_bug_state = BUG_STATE_IDLE;
     s_bug_phase_start = 0;
 
@@ -246,10 +254,22 @@ static void CW_KeyerInit()
     }
 
     bool uses_port_ground = (key_input_mode & CW_KEY_FLAG_PORT_GROUND) != 0;
-    bool uses_port_ring   = (key_input_mode & CW_KEY_FLAG_PORT_RING) != 0;
     bool uses_usb_port    = (key_input_mode & CW_KEY_FLAG_USB_PORT) != 0;
 
-    CW_ConfigurePortRing(uses_port_ring);
+    // Handkey-family modes have no timing engine, so nothing will ever decode
+    // a fresh character into the TX display while active. Clear out whatever
+    // was left behind by a prior paddle/macro session so it can't resurface
+    // (e.g. via the post-TX holdoff window) and look like a live decode.
+    if (key_input_mode & CW_KEY_FLAG_NO_KEYER) {
+        CW_ClearTxDisplay();
+        gCW_TxDisplayHoldoff_10ms = 0;
+    }
+
+    // Every mode that sets PORT_RING also sets PORT_GROUND, and Port Handkey mode
+    // (PORT_GROUND without PORT_RING) also needs the ring pin configured since it
+    // treats either port contact as the key - so PORT_GROUND alone is sufficient
+    // to decide whether the ring pin should be configured.
+    CW_ConfigurePortRing(uses_port_ground);
     if (uses_port_ground)
         CW_ConfigurePortGround(true);
     CW_ConfigureUsbPaddlePins(uses_usb_port);
@@ -461,9 +481,12 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     // hard deconfig, get all pins in a known state
     CW_KeyerDeinit();
 
-    // Determine if we need to configure port pins for this mode (use bit flags)
+    // Determine if we need to configure port pins for this mode (use bit flags).
+    // PORT_GROUND alone is sufficient to decide whether the ring pin (PA13) needs
+    // checking too: every PORT_RING mode also sets PORT_GROUND, and Port Handkey
+    // mode (PORT_GROUND without PORT_RING) needs the ring pin checked as well
+    // since it treats either port contact as the key.
     bool uses_port_ground = (new_mode & CW_KEY_FLAG_PORT_GROUND);
-    bool uses_port_ring = (new_mode & CW_KEY_FLAG_PORT_RING);
     bool uses_usb_port  = (new_mode & CW_KEY_FLAG_USB_PORT);
 
     // Handkey mode without port ground doesn't need further validation.
@@ -475,27 +498,22 @@ bool CW_CheckKeyerInputs(uint8_t new_mode)
     }
 
     // Button-only modes don't need validation (no port pins to check)
-    if (!uses_port_ground && !uses_port_ring && !uses_usb_port) {
+    if (!uses_port_ground && !uses_usb_port) {
         return true;
     }
-    
+
 #if CW_KEYER_DEBUG
     UART_Send("Checking CW keyer inputs\r\n", 26);
 #endif
-    
+
     // Temporarily configure port pins if needed
     if (uses_port_ground)
-    {        
+    {
 #if CW_KEYER_DEBUG
-        UART_Send("Configuring port ground for CW keyer check\r\n", 44);
+        UART_Send("Configuring port ground and ring for CW keyer check\r\n", 55);
 #endif
-        CW_ConfigurePortGround(uses_port_ground);
-    }
-    if( uses_port_ring) {
-#if CW_KEYER_DEBUG
-        UART_Send("Configuring port ring for CW keyer check\r\n", 42);
-#endif
-        CW_ConfigurePortRing(uses_port_ring);
+        CW_ConfigurePortGround(true);
+        CW_ConfigurePortRing(true);
     }
     if (uses_usb_port) {
 #if CW_KEYER_DEBUG
@@ -583,9 +601,37 @@ CW_Action_t ptt_action(void)
         bool tip = false, ring = false;
         CW_ReadUSBPaddleRaw(&tip, &ring);
         ptt = tip || ring;
+    } else if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_PORT_GROUND) {
+        // Port Handkey: either port contact (tip or ring) acts as a straight key.
+        // (This branch is only reached for NO_KEYER modes - see the caller in
+        // CW_HandleState - and USB_PORT is already handled above, so PORT_GROUND
+        // alone is enough to identify Port Handkey mode here.)
+
+        // Go through CW_ReadKeys() rather than CW_ReadKeysForMode() directly -
+        // CW_ReadKeys() applies the cross-poll 3-strike debounce on top of the
+        // per-read deglitch.
+        CW_Input in = {0};
+        CW_ReadKeys(&in);
+        ptt = in.dit || in.dah;
     } else {
         // Read PTT button (PC5) via wrapper (active low)
         ptt = GPIO_IsPttPressed();
+    }
+
+    if (ptt) {
+        // Closed (on either pin) is trusted immediately - see rationale above.
+        s_handkey_release_pending = false;
+    } else {
+        // Both open. Don't believe it's a real release until it's held for
+        // the full window; a fresh closure before then (same pin re-bouncing,
+        // or the other pin taking over) cancels the pending release entirely.
+        if (!s_handkey_release_pending) {
+            s_handkey_release_pending = true;
+            s_handkey_release_pending_since_ms = millis();
+        }
+        if (millis_since(s_handkey_release_pending_since_ms) < CW_HANDKEY_RELEASE_DEBOUNCE_MS) {
+            ptt = s_last_handkey_ptt;
+        }
     }
 
     if (ptt && !s_last_handkey_ptt) {
@@ -666,11 +712,28 @@ static CW_Action_t CW_HandleBugState(void)
 
     case BUG_STATE_DAH_HOLD:
         if (in.dah) {
+            // Held (or re-closed before a pending release below was confirmed) -
+            // a fresh closure is always trusted immediately, same as ptt_action().
+            s_handkey_release_pending = false;
             return CW_ACTION_CARRIER_HOLD_ON;
         }
 
+        // Dah paddle reads open. Don't trust it as a real release until it's
+        // held for the full debounce window - same rationale and constant as
+        // ptt_action(): dah is a raw handkey on this same hardware, so it
+        // bounces the same way. Without this, a bounce chain reads as
+        // "released" on its first clean open sample, chopping one held dah
+        // into several short ones.
+        if (!s_handkey_release_pending) {
+            s_handkey_release_pending = true;
+            s_handkey_release_pending_since_ms = now;
+        }
+        if (millis_since(s_handkey_release_pending_since_ms) < CW_HANDKEY_RELEASE_DEBOUNCE_MS) {
+            return CW_ACTION_CARRIER_HOLD_ON;
+        }
+        s_handkey_release_pending = false;
+
         if(millis_since(s_bug_phase_start) >= (uint32_t)s_gap_count) {
-            // only encode the non-glitchy elements
             CW_EncoderProcessElement(CW_ELEMENT_DAH);
         }
 

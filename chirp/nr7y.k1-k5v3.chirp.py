@@ -54,7 +54,11 @@ DEBUG_SHOW_OBFUSCATED_COMMANDS = False
 DEBUG_SHOW_MEMORY_ACTIONS = False
 
 # TODO: remove the driver version when it's in mainline chirp 
-DRIVER_VERSION = "Quansheng UV-K1 / UV-K5 V3 driver ver: 2026/05/07 (c) F4HWN v5.5.0"
+# The @NR7Y_VERSION@ token is replaced with the firmware release tag by the
+# release workflow (.github/workflows/main.yml) so the module version always
+# matches the firmware it ships with. In an unreleased working copy it stays
+# as the literal placeholder.
+DRIVER_VERSION = "Quansheng UV-K1 / UV-K5 V3 (F4HWN + NR7Y CW) driver ver: @NR7Y_VERSION@"
 FIRMWARE_VERSION_UPDATE = "https://github.com/armel/uv-k1-k5v3-firmware-custom/releases"
 CHIRP_DRIVER_VERSION_UPDATE = "https://github.com/armel/uv-k1-k5v3-firmware-custom/releases"
 
@@ -192,8 +196,8 @@ u8 crossband;
 u8 battery_save;
 u8 dual_watch;
 u8 backlight_time;
-u8 __UNUSED10:5,
-   set_nfm:2,
+u8 __UNUSED10:6,
+   set_nfm:1,
    ste:1;
 u8 current_state;
 
@@ -332,7 +336,12 @@ u8 ENABLE_CW_MODULATOR:1,
    ENABLE_FLASHLIGHT:1;
 } BUILD_OPTIONS;
 
-u8 __UNUSED14;
+// State[2]: keypad lock scope, full byte (0..SET_LCK_LEN-1).
+// Firmware >= v5.6 moved set_lck here and widened it to 4 values
+// (KEYS / +ACTIONS / +PTT / +ACTIONS+PTT); it used to be a single bit
+// packed into the set_gui byte below. See settings.c (State[2] = set_lck).
+u8 __UNUSED14:6,
+set_lck:2;
 u8 __UNUSED15;
 
 u8 set_off_tmr:7,
@@ -340,7 +349,7 @@ set_tmr:1;
 
 u8 set_gui:1,
 set_met:1,
-set_lck:1,
+__UNUSED17:1,
 set_inv:1,
 set_contrast:4;
 
@@ -479,8 +488,9 @@ SET_TOT_EOT_LIST = ["OFF", "SOUND", "VISUAL", "ALL"]
 # SET_OFF_ON f4hwn
 SET_OFF_ON_LIST = ["OFF", "ON"]
 
-# SET_lck f4hwn
-SET_LCK_LIST = ["KEYS", "KEYS+PTT"]
+# SET_lck f4hwn - keypad lock scope (matches firmware enum SET_LCK_t /
+# gSubMenu_SET_LCK: KEYS=0, +ACTIONS=1, +PTT=2, +ACTIONS+PTT=3)
+SET_LCK_LIST = ["KEYS", "KEYS + ACTIONS", "KEYS + PTT", "KEYS + ACTIONS + PTT"]
 
 # SET_MET SET_GUI f4hwn
 SET_MET_LIST = ["TINY", "CLASSIC"]
@@ -528,6 +538,12 @@ TALK_TIME_LIST = ["N/U", "N/U", "N/U", "N/U", "N/U", "30 sec", "35 sec", "40 sec
 
 # Set NFM value
 SET_NFM_LIST = ["NARROW", "NARROWER"]
+
+# Per-channel CW/SSB bandwidth. Firmware reuses the TXLock bit for CW/USB
+# channels to select the 2.0kHz "narrowest" RF filter instead (TX_LOCK is
+# inapplicable to those modes and is forced off whenever this applies - see
+# RADIO_ConfigureChannel in radio.c).
+NR7Y_CW_SSB_BANDWIDTH_LIST = ["NARROW", "NARROWEST"]
 
 # Set RxA value
 SET_RXA_FM_LIST = ["FLAT", "CLEAN", "MID", "BOOST", "MAX"]
@@ -2447,8 +2463,12 @@ class UVK5RadioEgzumer(chirp_common.CloneModeRadio):
         # Set_lck, uses
         tmpsetlck = list_def(_mem.set_lck, SET_LCK_LIST, 0)
         val = RadioSettingValueList(SET_LCK_LIST, SET_LCK_LIST[tmpsetlck])
-        SetLckSetting = RadioSetting("set_lck", "Lock PTT Key When Keypad Is Locked (SetLck)", val)
-        SetLckSetting.set_doc('SetLck: When the keypad is locked, lock also the PTT key')
+        SetLckSetting = RadioSetting("set_lck", "Keypad Lock Scope (SetLck)", val)
+        SetLckSetting.set_doc('Select which controls are disabled when the keypad is locked:\n' + \
+                            '* KEYS\n' + \
+                            '* KEYS + ACTIONS\n' + \
+                            '* KEYS + PTT\n' + \
+                            '* KEYS + ACTIONS + PTT')
         
         # Set_met f4hwn
         tmpsetmet = list_def(_mem.set_met, SET_MET_LIST, 0)
@@ -3520,19 +3540,85 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     # ------------------------------------------------------------------ memory
 
     def get_memory(self, number):
+        # The base class decodes mode from raw modulation*2 + bandwidth,
+        # sized for exactly the 5 combinations of FM/NFM/AM/NAM/USB.
+        # Appending "CW" to valid_modes (6 entries) shifted that table's
+        # bounds check, so two raw values now decode wrong straight out of
+        # the base class:
+        #   - USB narrow (modulation=2, bandwidth=1 - what set_memory always
+        #     writes for USB) computes to index 5, which used to fall
+        #     through to the "USB narrow" special case but now lands
+        #     directly on the new 6th list entry, "CW".
+        #   - CW itself (modulation=3) computes to index 6 or 7, always out
+        #     of range, which the base class treats as *corrupt* data - it
+        #     not only reports "FM" but destructively zeroes
+        #     modulation/bandwidth on the live memmap object, so merely
+        #     displaying a CW channel silently erased its CW-ness before
+        #     this override ever got a chance to run.
+        # Fix both by presenting the base class a substitute raw value it
+        # always decodes correctly, then restoring the true bits (and the
+        # true mode) immediately after - nothing outside this call ever sees
+        # the substitute.
+        is_cw = False
+        is_usb_narrow = False
+        raw_mod = raw_bw = 0
+
+        _mem_chan = None
+        if isinstance(number, int):
+            ch_num = number - 1
+            if ch_num < MR_CHANNELS_MAX:
+                _mem_chan = self._memobj.channel[ch_num]
+            else:
+                _mem_chan = self._memobj.vfo_channel[ch_num - MR_CHANNELS_MAX]
+
+        if _mem_chan is not None:
+            raw_mod = int(_mem_chan.modulation)
+            raw_bw = int(_mem_chan.bandwidth)
+            is_cw = (raw_mod == 3)          # MODULATION_CW
+            is_usb_narrow = (raw_mod == 2 and raw_bw == 1)   # MODULATION_USB, narrow
+
+            if is_cw:
+                _mem_chan.modulation = 0
+                _mem_chan.bandwidth = 0
+            elif is_usb_narrow:
+                _mem_chan.bandwidth = 0
+
         mem = super().get_memory(number)
-        # The base class formula (modulation*2 + bandwidth) cannot represent
-        # CW (firmware modulation=3).  Re-check raw modulation and fix.
-        if getattr(mem, 'empty', False) or not isinstance(number, int):
-            return mem
-        ch_num = number - 1
-        if ch_num < MR_CHANNELS_MAX:
-            raw_mod = int(self._memobj.channel[ch_num].modulation)
-        else:
-            vfo_idx = ch_num - MR_CHANNELS_MAX
-            raw_mod = int(self._memobj.vfo_channel[vfo_idx].modulation)
-        if raw_mod == 3:   # MODULATION_CW
-            mem.mode = "CW"
+
+        if _mem_chan is not None:
+            if is_cw:
+                _mem_chan.modulation = raw_mod
+                _mem_chan.bandwidth = raw_bw
+                if not getattr(mem, 'empty', False):
+                    mem.mode = "CW"
+            elif is_usb_narrow:
+                _mem_chan.bandwidth = raw_bw
+
+            # For CW/USB channels, firmware reuses the TXLock bit to select
+            # the 2.0kHz "narrowest" RF filter instead (TX_LOCK can never be
+            # true for these modes - RADIO_ConfigureChannel forces it off).
+            # The base class built an Extra "txLock" setting labeled as a TX
+            # lock regardless of mode; relabel it here to match what the bit
+            # actually does for CW/USB, without changing its internal name -
+            # set_memory's existing "txLock" write-back path still applies.
+            if (raw_mod in (2, 3) and self._is_nr7y_cw_firmware()
+                    and not getattr(mem, 'empty', False)):
+                new_extra = RadioSettingGroup("Extra", "extra")
+                for rs in mem.extra:
+                    if rs.get_name() == "txLock":
+                        enc = list_def(int(rs.value), NR7Y_CW_SSB_BANDWIDTH_LIST, 0)
+                        rs = RadioSetting(
+                            "txLock", "Bandwidth (CW/SSB)",
+                            RadioSettingValueList(NR7Y_CW_SSB_BANDWIDTH_LIST, None, enc))
+                        rs.set_doc(
+                            'On CW/SSB channels this bit selects the extra-narrow '
+                            '2.0kHz RF filter instead of TX Lock, which does not '
+                            'apply to these modes.\n'
+                            '* NARROW: normal CW/SSB filter\n'
+                            '* NARROWEST: extra-narrow 2.0kHz filter')
+                    new_extra.append(rs)
+                mem.extra = new_extra
+
         return mem
 
     def set_memory(self, memory):

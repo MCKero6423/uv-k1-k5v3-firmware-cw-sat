@@ -46,8 +46,8 @@
 // Local state for last sampled paddles (edge detection)
 static bool     s_last_dit   = false;
 static bool     s_last_dah   = false;
-static uint32_t s_dit_count  = 0;  // consecutive raw-true reads for dit
-static uint32_t s_dah_count  = 0;  // consecutive raw-true reads for dah
+static uint32_t s_dit_count  = 0;  // consecutive raw reads disagreeing with confirmed dit state
+static uint32_t s_dah_count  = 0;  // consecutive raw reads disagreeing with confirmed dah state
 static bool     s_last_is_dah = false;  // which paddle was pressed most recently (for Ultimatic mode)
 
 // Read button ring input (SIDE1)
@@ -131,8 +131,16 @@ static bool CW_ReadGpioDeglitched(GPIO_TypeDef *gpio_port, uint32_t pin_mask, bo
     }
 #if ENABLE_CW_HARDWARE_DEBUG
     char dbg_buf[80];
-        sprintf_(dbg_buf, "s=%u r=0x%08X m=%u r=%u\r\n", (unsigned)(i>=goal), (unsigned)reg, (unsigned)i, (unsigned)result);
-        UART_Send(dbg_buf, strlen(dbg_buf));
+    sprintf_(dbg_buf, "%s: s=%u r=0x%08X m=%u r=%u\r\n", label, (unsigned)(i>=goal), (unsigned)reg, (unsigned)i, (unsigned)result);
+    // UART_Send is a no-op here: USART1 (PA10) is disabled whenever
+    // CW_ConfigurePortGround(true) is active (Port Handkey and friends), which
+    // is exactly when this print is most useful. Route over USB CDC instead -
+    // it's untouched by any port-ground mode and cheap when nothing's listening.
+#ifdef ENABLE_USB
+    VCP_SendStr(dbg_buf);
+#else
+    UART_Send(dbg_buf, strlen(dbg_buf));
+#endif
 #endif
     return result;
 }
@@ -437,10 +445,14 @@ bool CW_ReadKeysForMode(uint8_t mode, bool *dit_out, bool *dah_out)
         CW_ReadSideButton(&hw_ring);
     }
 
-    // Read port ring input if enabled and OR with button ring.
+    // Read port ring input if enabled and OR with button ring. PORT_GROUND is
+    // checked rather than PORT_RING so that Port Handkey mode (PORT_GROUND set,
+    // no PORT_RING flag of its own) also reads the ring contact as an alternate
+    // key input alongside tip (either pin active) - every mode that sets
+    // PORT_RING also sets PORT_GROUND, so this covers both cases.
     // Short-circuit: if SD1 already resolved true, skip the expensive heavy deglitch —
     // the OR result is the same and we avoid ~500us of sampling overhead on every poll.
-    if ((mode & CW_KEY_FLAG_PORT_RING) && !hw_ring) {
+    if ((mode & CW_KEY_FLAG_PORT_GROUND) && !hw_ring) {
         // New hardware: port-ring is on PA13 (SWDIO when not used). Use deglitch helper on GPIOA bit 13.
         hw_ring = CW_ReadGpioDeglitched(GPIOA, LL_GPIO_PIN_13, false);
     }
@@ -473,20 +485,33 @@ void CW_ReadKeys(CW_Input *in)
         n_dah = false;
     }
 
-    bool deb_dit, deb_dah;
+    bool deb_dit = s_last_dit;
+    bool deb_dah = s_last_dah;
     if (gEeprom.CW_KEY_INPUT & CW_KEY_FLAG_USB_PORT) {
         // USB port paddle already went through its own tri-state glitch
         // filter. Honor the single read as-is.
         deb_dit = n_dit;
         deb_dah = n_dah;
     } else {
-        // Three-strike debounce: increment counter while raw line is active, reset on inactive.
-        if (n_dit) s_dit_count++; else s_dit_count = 0;
-        if (n_dah) s_dah_count++; else s_dah_count = 0;
+        // Asymmetric debounce: a press must be confirmed by three consecutive
+        // raw reads (glitch immunity on key-down), but a release takes effect
+        // on the first raw-open read so the iambic FSM sees paddle-open
+        // promptly. A symmetric release delay here starves the count-based
+        // debounce in the iambic path (CW_ReadKeys is skipped while
+        // s_pending_alternate is set) and makes mode B re-latch the still-high
+        // level into extra trailing elements. The straight-key/bug modes that
+        // want a release glitch-filter apply their own 40ms release debounce
+        // in cwkeyer.c and do not depend on this. Any read that agrees with
+        // the confirmed state resets the counter.
+        if (n_dit == deb_dit)   s_dit_count = 0;                 // agrees: no change
+        else if (!deb_dit) {                                     // rising: three-strike
+            if (++s_dit_count >= 3) { deb_dit = true; s_dit_count = 0; }
+        } else { deb_dit = false; s_dit_count = 0; }             // falling: immediate
 
-        // Debounced state: line is considered active only after 3 consecutive hits.
-        deb_dit = (s_dit_count >= 3);
-        deb_dah = (s_dah_count >= 3);
+        if (n_dah == deb_dah)   s_dah_count = 0;
+        else if (!deb_dah) {
+            if (++s_dah_count >= 3) { deb_dah = true; s_dah_count = 0; }
+        } else { deb_dah = false; s_dah_count = 0; }
     }
 
     // Edges computed against previous debounced state.
@@ -616,6 +641,8 @@ void CW_HW_ResetKeySamples(void)
     s_last_dit   = false;
     s_last_dah   = false;
     s_last_is_dah = false;
+    s_dit_count  = 0;
+    s_dah_count  = 0;
 }
 
 
