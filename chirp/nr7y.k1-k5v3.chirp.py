@@ -784,10 +784,18 @@ _NR7Y_CW_KEYER_MODES = [
     "Semi-Auto Bug",  # 3
 ]
 
-# Extended key actions list for NR7Y firmware with CW modulator.
-# Matches firmware settings.h ACTION_OPT_t with FEAT_F4HWN + RESCUE_OPS + CW_MODULATOR + BEAM.
-# CW actions (indices 23-30) are inserted before BEAM (index 31).
-_NR7Y_KEYACTIONS_LIST = [
+# Extended key actions for NR7Y firmware with CW modulator, mirroring
+# App/settings.h enum ACTION_OPT_t.
+#
+# The firmware enum is conditionally compiled, so a stored key-action number only
+# means something relative to the features that build has.  Slots 0-13 are
+# unconditional -- the enum keeps a value for ALARM/FM/1750/FLASHLIGHT even when
+# the feature is compiled out, which is why those only need filtering out of the
+# displayed choices -- but the RESCUE_OPS block shifts everything after it, so the
+# index mapping has to be assembled per build instead of hardcoded.  With
+# RESCUE_OPS off the CW actions sit at 21-28 and CODE PRACTICE at 29; with it on
+# they are 23-30 and 31.
+_NR7Y_ACTIONS_COMMON = [
     "NONE",            # 0:  ACTION_OPT_NONE
     "FLASHLIGHT",      # 1:  ACTION_OPT_FLASHLIGHT
     "POWER",           # 2:  ACTION_OPT_POWER
@@ -802,6 +810,7 @@ _NR7Y_KEYACTIONS_LIST = [
     "VFO / MEM",       # 11: ACTION_OPT_VFO_MR
     "MODE",            # 12: ACTION_OPT_SWITCH_DEMODUL
     "BL_MIN_TMP_OFF",  # 13: ACTION_OPT_BLMIN_TMP_OFF
+    # ENABLE_FEAT_F4HWN
     "RX MODE",         # 14: ACTION_OPT_RXMODE
     "MAIN ONLY",       # 15: ACTION_OPT_MAINONLY
     "PTT",             # 16: ACTION_OPT_PTT
@@ -809,18 +818,42 @@ _NR7Y_KEYACTIONS_LIST = [
     "BACKLIGHT",       # 18: ACTION_OPT_BACKLIGHT
     "MUTE",            # 19: ACTION_OPT_MUTE
     "RxA",             # 20: ACTION_OPT_RXA
-    "POWER HIGH",      # 21: ACTION_OPT_POWER_HIGH   (ENABLE_FEAT_F4HWN_RESCUE_OPS)
-    "REMOVE OFFSET",   # 22: ACTION_OPT_REMOVE_OFFSET
-    "PLAY CW MSG 1",   # 23: ACTION_OPT_PLAY_CWMSG1   (ENABLE_CW_MODULATOR)
-    "PLAY CW MSG 2",   # 24: ACTION_OPT_PLAY_CWMSG2
-    "PLAY CW MSG 3",   # 25: ACTION_OPT_PLAY_CWMSG3
-    "PLAY CW MSG 4",   # 26: ACTION_OPT_PLAY_CWMSG4
-    "REPEAT CW MSG 1", # 27: ACTION_OPT_REPEAT_CWMSG1
-    "REPEAT CW MSG 2", # 28: ACTION_OPT_REPEAT_CWMSG2
-    "REPEAT CW MSG 3", # 29: ACTION_OPT_REPEAT_CWMSG3
-    "REPEAT CW MSG 4", # 30: ACTION_OPT_REPEAT_CWMSG4
-    "BEAM",            # 31: ACTION_OPT_BEAM           (ENABLE_FEAT_F4HWN_BEAM)
 ]
+
+# ENABLE_FEAT_F4HWN_RESCUE_OPS
+_NR7Y_ACTIONS_RESCUE_OPS = ["POWER HIGH", "REMOVE OFFSET"]
+
+# ENABLE_CW_MODULATOR
+_NR7Y_ACTIONS_CW = [
+    "PLAY CW MSG 1",
+    "PLAY CW MSG 2",
+    "PLAY CW MSG 3",
+    "PLAY CW MSG 4",
+    "REPEAT CW MSG 1",
+    "REPEAT CW MSG 2",
+    "REPEAT CW MSG 3",
+    "REPEAT CW MSG 4",
+    # ACTION_OPT_CPO is guarded on ENABLE_CW_MODULATOR *and*
+    # ENABLE_CODE_PRACTICE, but BUILD_OPTIONS has no spare bit to report code
+    # practice separately and every CW preset enables both, so it rides along
+    # with the CW block.
+    "CODE PRACTICE",
+]
+
+# ENABLE_FEAT_F4HWN_BEAM. Also has no BUILD_OPTIONS bit, but it sits at the end
+# of the enum so assuming it is present cannot shift anything above it.
+_NR7Y_ACTIONS_TAIL = ["BEAM"]
+
+
+def _nr7y_keyactions_list(has_rescue_ops, has_cw):
+    """Return the index -> action-name map for the running firmware build."""
+    lst = list(_NR7Y_ACTIONS_COMMON)
+    if has_rescue_ops:
+        lst += _NR7Y_ACTIONS_RESCUE_OPS
+    if has_cw:
+        lst += _NR7Y_ACTIONS_CW
+    return lst + _NR7Y_ACTIONS_TAIL
+
 
 def xorarr(data: bytes):
     """the communication is obfuscated using this fine mechanism"""
@@ -3642,21 +3675,33 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
 
     # ------------------------------------------------------------------ key actions helper
 
+    def _nr7y_action_map(self):
+        """Return the index -> action-name map for the firmware on the radio.
+
+        Mirrors the conditionally-compiled ACTION_OPT_t enum so the numbers we
+        read and write line up with the actions that build actually has.
+        """
+        try:
+            has_rescue_ops = bool(
+                self._memobj.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS)
+        except Exception as exc:
+            LOG.warning("Cannot read ENABLE_FEAT_F4HWN_RESCUE_OPS: %s", exc)
+            has_rescue_ops = False
+        return _nr7y_keyactions_list(has_rescue_ops,
+                                     self._is_nr7y_cw_firmware())
+
     def _get_nr7y_action(self, action_num):
         """Return (choices_list, current_str) for a programmable key.
 
-        Uses the NR7Y extended list when CW is detected, otherwise falls back
-        to the base KEYACTIONS_LIST so non-CW firmware is handled correctly.
-        Applies the same BUILD_OPTIONS-based filtering as the base driver.
+        The map from _nr7y_action_map only contains actions the build compiled,
+        so the filtering here is purely about which of those to offer.
         """
-        has_cw = self._is_nr7y_cw_firmware()
-        base_list = _NR7Y_KEYACTIONS_LIST if has_cw else KEYACTIONS_LIST
+        base_list = self._nr7y_action_map()
 
         has_alarm       = self._memobj.BUILD_OPTIONS.ENABLE_ALARM
         has_1750        = self._memobj.BUILD_OPTIONS.ENABLE_TX1750
         has_flashlight  = self._memobj.BUILD_OPTIONS.ENABLE_FLASHLIGHT
         has_fm_radio    = self._memobj.BUILD_OPTIONS.ENABLE_FMRADIO
-        has_rescue_ops  = self._memobj.BUILD_OPTIONS.ENABLE_FEAT_F4HWN_RESCUE_OPS
         has_vox         = self._memobj.BUILD_OPTIONS.ENABLE_VOX
 
         lst = base_list.copy()
@@ -3665,6 +3710,8 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
             if a in lst:
                 lst.remove(a)
 
+        # These keep an enum slot even when compiled out, so they are always in
+        # the map and only ever need hiding from the choices.
         if not has_alarm:
             if "ALARM" in lst:
                 lst.remove("ALARM")
@@ -3677,18 +3724,9 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
         if not has_fm_radio:
             if "FM RADIO" in lst:
                 lst.remove("FM RADIO")
-        if not has_rescue_ops:
-            for a in ("POWER HIGH", "REMOVE OFFSET"):
-                if a in lst:
-                    lst.remove(a)
         if not has_vox:
             if "MUTE" in lst:
                 lst.remove("MUTE")
-        if not has_cw:
-            for a in ("PLAY CW MSG 1", "PLAY CW MSG 2", "PLAY CW MSG 3", "PLAY CW MSG 4",
-                      "REPEAT CW MSG 1", "REPEAT CW MSG 2", "REPEAT CW MSG 3", "REPEAT CW MSG 4"):
-                if a in lst:
-                    lst.remove(a)
 
         action_num = int(action_num)
         if action_num >= len(base_list) or base_list[action_num] not in lst:
@@ -3824,8 +3862,9 @@ class UVK5_NR7Y_Fusion(UVK5RadioEgzumer):
     def set_settings(self, settings):
         _mem = self._memobj
         has_cw = self._is_nr7y_cw_firmware()
-        # Choose the right key-action list based on the actual firmware build
-        action_list = _NR7Y_KEYACTIONS_LIST if has_cw else KEYACTIONS_LIST
+        # Same map the settings were built from, so a name round-trips to the
+        # number this firmware build means by it.
+        action_list = self._nr7y_action_map()
 
         for element in settings:
             if not isinstance(element, RadioSetting):

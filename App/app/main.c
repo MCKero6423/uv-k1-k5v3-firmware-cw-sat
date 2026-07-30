@@ -467,12 +467,10 @@ static void processFKeyLongFunction(const KEY_Code_t Key)
 
 #if defined(ENABLE_CODE_PRACTICE) && defined(ENABLE_CW_MODULATOR)
         case KEY_5:
-            if (gTxVfo->Modulation == MODULATION_CW) {
-                CPO_Enter();
-                gRequestDisplayScreen = DISPLAY_CPO;
-            } else {
-                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
-            }
+            // CPO_Enter borrows CW modulation itself, so practice is reachable
+            // from any mode.
+            CPO_Enter();
+            gRequestDisplayScreen = DISPLAY_CPO;
             break;
 #endif
 

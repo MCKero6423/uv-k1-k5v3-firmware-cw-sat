@@ -565,11 +565,7 @@ static void ACTION_Scan_FM(bool bRestart)
 
 static void ACTION_CPO(void)
 {
-    gTxVfo->Modulation = MODULATION_CW;
-	gFlagReconfigureVfos = true;
-
     CPO_Enter();
-
 }
 
 #endif
