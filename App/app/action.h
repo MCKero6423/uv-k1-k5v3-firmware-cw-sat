@@ -55,9 +55,6 @@ void ACTION_SwitchFilter(void);
         void ACTION_RxTxLog(void);
     #endif
 #endif
-#ifdef ENABLE_CODE_PRACTICE
-    static void ACTION_CPO(void);
-#endif
 void ACTION_Handle(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld);
 
 #endif
