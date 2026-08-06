@@ -96,7 +96,7 @@ static bool           s_last_handkey_ptt = false; // last accepted/confirmed PTT
 static bool           s_handkey_release_pending = false; // true while waiting out the release debounce
 static uint32_t       s_handkey_release_pending_since_ms = 0; // millis() timestamp the release was first observed
 
-#define CW_HANDKEY_RELEASE_DEBOUNCE_MS 40
+#define CW_HANDKEY_RELEASE_DEBOUNCE_MS 10
 
 // Macro playback state
 static char s_playback_buf[CW_MACRO_MAX_LEN * 2 + 1]; // decoded with spaces inserted
