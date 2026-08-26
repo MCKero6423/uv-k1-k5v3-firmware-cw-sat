@@ -86,10 +86,15 @@ void UI_DisplayStatus()
 
 #if defined(ENABLE_FEAT_F4HWN_RX_TX_TIMER) && !defined(ENABLE_FEAT_F4HWN_DEBUG)
     bool isTransmit = gCurrentFunction == FUNCTION_TRANSMIT;
+    // The RX/TX timer shares this slot with the RxMode indicator, and satellite
+    // mode forces the squelch open, so FUNCTION_IsRx() stays true continuously
+    // and the timer would permanently hide the mode/INV indicator. The timer is
+    // not useful while working a transponder, so suppress it in this mode.
+    const bool timerSuppressed = SPLITRX_IsEnabled();
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
-    if (!isRxTxLogScreen && gSetting_set_tmr && (isTransmit || FUNCTION_IsRx())) {
+    if (!isRxTxLogScreen && !timerSuppressed && gSetting_set_tmr && (isTransmit || FUNCTION_IsRx())) {
 #else
-    if (gSetting_set_tmr && (isTransmit || FUNCTION_IsRx())) {
+    if (!timerSuppressed && gSetting_set_tmr && (isTransmit || FUNCTION_IsRx())) {
 #endif
         convertTime(line, !isTransmit);
         x += 39;
