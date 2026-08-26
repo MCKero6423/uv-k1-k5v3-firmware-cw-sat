@@ -25,6 +25,7 @@
 #include "driver/bk4819.h"
 #include "driver/py25q16.h"
 #include "misc.h"
+#include "app/splitrx.h"
 #include "settings.h"
 #include "ui/menu.h"
 
@@ -403,6 +404,10 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
     gEeprom.MAIN_RX_SUB_TX     = (Data[3] == 0x01)
                               && (gEeprom.DUAL_WATCH == DUAL_WATCH_OFF)
                               && (gEeprom.CROSS_BAND_RX_TX == CROSS_BAND_OFF);
+    // This assignment bypasses SPLITRX_SetMode, and a serial EEPROM write can
+    // re-run the loader mid-transmission, so resynchronise the module's role
+    // state with the flag we just installed.
+    SPLITRX_ResetRoleState();
 #endif
     gSetting_350EN             = (Data[5] < 2) ? Data[5] : true;
 #ifdef ENABLE_FEAT_F4HWN

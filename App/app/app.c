@@ -1076,11 +1076,7 @@ void APP_EndTransmission(void)
 {
     // back to RX mode
     RADIO_SendEndOfTransmission();
-    SPLITRX_EndTx();
-    // Drains a deferred INV toggle. The deferral path is active in CW mode
-    // (ToggleInv delays until the keyer releases) and as a generic safety net
-    // for any transmission that began while the user was pressing INV TRACK.
-    SPLITRX_ApplyPendingInv();
+    SPLITRX_EndTx();  // also drains any INV toggle deferred during this TX
 
     gFlagEndTransmission = true;
 
@@ -2282,11 +2278,13 @@ static void ALARM_Off(void)
 
     if (gAlarmState == ALARM_STATE_TXALARM || gAlarmState == ALARM_STATE_TX1750) {
         RADIO_SendEndOfTransmission();
-        // This path bypasses APP_EndTransmission, so release the role pointers
-        // here too or the fifth RxMode would stay stuck on SUB.
-        SPLITRX_EndTx();
-        SPLITRX_ApplyPendingInv();
     }
+
+    // Unconditional: the alarm state machine promotes TXALARM to SITE_ALARM
+    // while still transmitting, so gating this on the state above would leave
+    // tx_active latched forever (EndTx is idempotent, so calling it always is
+    // safe). This path bypasses APP_EndTransmission entirely.
+    SPLITRX_EndTx();
 
     gAlarmState = ALARM_STATE_OFF;
 

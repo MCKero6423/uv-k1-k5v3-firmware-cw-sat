@@ -1570,7 +1570,6 @@ void RADIO_PrepareCssTX(void)
     // APP_EndTransmission, so release the split-mode role pointers here or
     // tx_active would stay latched and block reception.
     SPLITRX_EndTx();
-    SPLITRX_ApplyPendingInv();
     RADIO_SetupRegisters(true);
 }
 

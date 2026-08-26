@@ -72,6 +72,21 @@ void SPLITRX_EndTx(void)
 
     tx_active = false;
     SPLITRX_SelectRoleVfos();
+    // Drained here rather than at each call site: a queued toggle belongs to the
+    // transmission that just ended, and a missed drain would silently apply it
+    // to a later, unrelated transmission (a wrong-direction Doppler flip).
+    SPLITRX_ApplyPendingInv();
+}
+
+void SPLITRX_ResetRoleState(void)
+{
+    // Called when MAIN_RX_SUB_TX is installed outside SPLITRX_SetMode (the
+    // EEPROM loader). Drops any stale transmit role so the module cannot be
+    // left believing a transmission is still in progress.
+    tx_active   = false;
+    inv_pending = false;
+    if (!gEeprom.MAIN_RX_SUB_TX)
+        inv_enabled = false;
 }
 
 void SPLITRX_SetMode(const bool enabled)
@@ -85,6 +100,10 @@ void SPLITRX_SetMode(const bool enabled)
     gEeprom.MAIN_RX_SUB_TX = enabled;
     inv_enabled            = false;
     inv_pending            = false;
+    // Entering the mode always starts from receive. Without this, any missed
+    // EndTx elsewhere would persist across a mode toggle and install the role
+    // pointers as if a transmission were still in progress.
+    tx_active              = false;
 
     if (enabled) {
         // The role pointers below are incompatible with dual watch and
@@ -154,13 +173,17 @@ bool SPLITRX_TuneMainFrequency(const uint32_t frequency)
 {
     VFO_Info_t *const main = SPLITRX_GetMainVfo();
 
-    if (RX_freq_check(frequency) != 0 || tx_active)
-        return false;
-
     if (!SPLITRX_IsInvEnabled()) {
+        // Plain assignment, exactly as before this feature existed: callers have
+        // already clamped, and adding a check here would reject values the stock
+        // firmware accepted (e.g. a 30 kHz step rounding up past the 1300 MHz
+        // limit on wide-RX builds).
         main->freq_config_RX.Frequency = frequency;
         return true;
     }
+
+    if (RX_freq_check(frequency) != 0 || tx_active)
+        return false;
 
     VFO_Info_t *const sub    = SPLITRX_GetSubVfo();
     const int64_t     delta  = (int64_t)frequency - main->freq_config_RX.Frequency;

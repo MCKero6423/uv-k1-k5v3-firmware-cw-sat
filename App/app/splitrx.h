@@ -32,6 +32,9 @@ void SPLITRX_BeginTx(void);
 void SPLITRX_EndTx(void);
 
 void SPLITRX_SetMode(bool enabled);
+// Resynchronises the module after MAIN_RX_SUB_TX is written directly (EEPROM
+// load), which can happen mid-transmission via a serial config write.
+void SPLITRX_ResetRoleState(void);
 void SPLITRX_ToggleInv(void);
 void SPLITRX_ApplyPendingInv(void);
 
