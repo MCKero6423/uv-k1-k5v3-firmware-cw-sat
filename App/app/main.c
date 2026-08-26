@@ -389,6 +389,14 @@ void channelMove(uint16_t Channel)
 {
     const uint8_t Vfo = gEeprom.TX_VFO;
 
+    // Loading a memory channel replaces MAIN wholesale, so there is no tuning
+    // delta to mirror onto SUB. INV tracking only works while stepping in VFO
+    // mode; refuse here rather than let MAIN drift away from SUB silently.
+    if (SPLITRX_IsInvEnabled()) {
+        gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+        return;
+    }
+
     if (!RADIO_CheckValidChannel(Channel, false, 0)) {
         if (gKeyInputCountdown <= 1) {
             gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
@@ -1062,13 +1070,24 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
                 }
                 uint32_t rx_frequency = frequency;
 #ifdef ENABLE_CW_MODULATOR
-				if (gTxVfo->Modulation == MODULATION_CW && !gCW_CrossMode)
+				// BFO belongs to the receive path, so key it off gRxVfo to match
+				// RADIO_SetupRegisters. They are the same VFO outside the fifth
+				// RxMode; inside it gRxVfo is MAIN, the VFO actually listening.
+				if (gRxVfo->Modulation == MODULATION_CW && !gCW_CrossMode)
 					rx_frequency -= gEeprom.CW_TONE_FREQUENCY; // CW BFO offset (10s of Hz)
 #endif
 				
 				BK4819_SetFrequency(rx_frequency);
                 BK4819_RX_TurnOn();
                 gRequestSaveChannel = 1;
+                return;
+            }
+
+            // Memory-channel stepping replaces MAIN wholesale, so there is no
+            // frequency delta to mirror onto SUB (channelMove() refuses for the
+            // same reason on the direct channel-entry path).
+            if (SPLITRX_IsInvEnabled()) {
+                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
                 return;
             }
 
