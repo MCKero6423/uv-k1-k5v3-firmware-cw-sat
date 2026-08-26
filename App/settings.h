@@ -286,7 +286,9 @@ typedef struct {
     uint8_t               CROSS_BAND_RX_TX;
     // Fifth RxMode: the user-selected MAIN VFO always receives while the other
     // VFO owns transmission (linear satellite transponder work). Persisted in
-    // the CW block at 0x0F20, State[5] -- a byte upstream marks as unused.
+    // the 0x0F40 block, State[3] -- the legacy gSetting_200TX byte, which the
+    // F4HWN build no longer writes. Cross-checked against DUAL_WATCH and
+    // CROSS_BAND being clear so a foreign value cannot enable it by accident.
     bool                  MAIN_RX_SUB_TX;
     uint8_t               BATTERY_SAVE;
     uint8_t               BACKLIGHT_TIME;

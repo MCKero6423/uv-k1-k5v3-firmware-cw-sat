@@ -393,23 +393,22 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
 #ifndef ENABLE_FEAT_F4HWN
     gSetting_200TX             = (Data[3] < 2) ? Data[3] : false;
     gSetting_500TX             = (Data[4] < 2) ? Data[4] : false;
+    gEeprom.MAIN_RX_SUB_TX     = false;  // byte owned by gSetting_200TX here
+#else
+    // Data[3] == 1: fifth RxMode (MAIN RX / SUB TX). This mode is mutually
+    // exclusive with dual watch and crossband, so requiring both to be clear
+    // cross-checks the flag: a legacy "200TX enabled" byte left behind by
+    // another fork cannot silently enable satellite mode unless the RxMode
+    // bytes happen to agree as well. Erased cells (0xFF) read as disabled.
+    gEeprom.MAIN_RX_SUB_TX     = (Data[3] == 0x01)
+                              && (gEeprom.DUAL_WATCH == DUAL_WATCH_OFF)
+                              && (gEeprom.CROSS_BAND_RX_TX == CROSS_BAND_OFF);
 #endif
     gSetting_350EN             = (Data[5] < 2) ? Data[5] : true;
 #ifdef ENABLE_FEAT_F4HWN
     gSetting_ScrambleEnable    = false;
-    // Data[6] bit 1: fifth RxMode (MAIN RX / SUB TX), guarded by a 0xA
-    // signature in the upper nibble. Erased cells (0xFF) and legacy scrambler
-    // values written by other forks (0x00/0x01) therefore read as disabled,
-    // which is also the default for a fresh install.
-    gEeprom.MAIN_RX_SUB_TX     = ((Data[6] & 0xF0) == 0xA0) && ((Data[6] & 0x02) != 0);
-    if (gEeprom.MAIN_RX_SUB_TX) {
-        // This mode owns the role pointers exclusively.
-        gEeprom.DUAL_WATCH       = DUAL_WATCH_OFF;
-        gEeprom.CROSS_BAND_RX_TX = CROSS_BAND_OFF;
-    }
 #else
     gSetting_ScrambleEnable    = (Data[6] < 2) ? Data[6] : true;
-    gEeprom.MAIN_RX_SUB_TX     = false;  // byte owned by the scrambler setting
 #endif
 
     //gSetting_TX_EN             = (Data[7] & (1u << 0)) ? true : false;
@@ -1124,14 +1123,18 @@ void SETTINGS_SaveSettings(void)
 #ifndef ENABLE_FEAT_F4HWN
     State[3]  = gSetting_200TX;
     State[4]  = gSetting_500TX;
+#else
+    // Fifth RxMode (MAIN RX / SUB TX). The F4HWN build no longer stores
+    // gSetting_200TX here, leaving the byte free. Written as a plain 0/1 so a
+    // radio flashed back to a non-F4HWN fork still reads a valid boolean for
+    // gSetting_200TX (that loader requires Data[3] < 2) instead of tripping its
+    // fallback. The loader side additionally requires DUAL_WATCH/CROSS_BAND to
+    // be clear, which keeps a legacy "200TX enabled" from enabling this mode.
+    State[3]  = gEeprom.MAIN_RX_SUB_TX ? 0x01 : 0x00;
 #endif
     State[5]  = gSetting_350EN;
 #ifdef ENABLE_FEAT_F4HWN
-    // Upstream writes a literal false here (scrambler is gone in F4HWN builds),
-    // so the byte is free above bit 0. Bits 7..4 carry a 0xA signature so a
-    // legacy gSetting_ScrambleEnable value (0/1) from another fork is never
-    // mistaken for our flag; bit 1 is the fifth RxMode itself.
-    State[6]  = 0xA0 | (gEeprom.MAIN_RX_SUB_TX ? 0x02 : 0x00);
+    State[6]  = false;
 #else
     State[6]  = gSetting_ScrambleEnable;
 #endif
