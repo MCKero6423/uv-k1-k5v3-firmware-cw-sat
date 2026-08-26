@@ -26,6 +26,7 @@
 #include "app/generic.h"
 #include "app/main.h"
 #include "app/scanner.h"
+#include "app/splitrx.h"
 
 #ifdef ENABLE_SPECTRUM
 #include "app/spectrum.h"
@@ -491,7 +492,13 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 }
                 
 				#ifdef ENABLE_CW_MODULATOR
-				if (Key == KEY_8 && gTxVfo->Modulation == MODULATION_CW) {
+				if (Key == KEY_8 && SPLITRX_GetTransmitRoleVfo()->Modulation == MODULATION_CW) {
+					// Locked out in the fifth RxMode: a linear transponder needs
+					// true keyed carrier, not CW rendered as an SSB audio tone.
+					if (SPLITRX_IsEnabled()) {
+						gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+						return;
+					}
 					gCW_CrossMode = !gCW_CrossMode;
 					gFlagReconfigureVfos = true;
 					gUpdateDisplay = true;
@@ -686,7 +693,10 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 Frequency = (Frequency < center) ? BX4819_band1.upper - gTxVfo->StepFrequency : BX4819_band2.lower;
             }
 
-            gTxVfo->freq_config_RX.Frequency = Frequency;
+            if (!SPLITRX_TuneMainFrequency(Frequency)) {
+                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+                return;
+            }
 
             gRequestSaveChannel = 1;
             return;
@@ -1041,7 +1051,10 @@ static void MAIN_Key_UP_DOWN(bool bKeyPressed, bool bKeyHeld, int8_t Direction)
                     gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
                     return;
                 }
-                gTxVfo->freq_config_RX.Frequency = frequency;
+                if (!SPLITRX_TuneMainFrequency(frequency)) {
+                    gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+                    return;
+                }
                 uint32_t rx_frequency = frequency;
 #ifdef ENABLE_CW_MODULATOR
 				if (gTxVfo->Modulation == MODULATION_CW && !gCW_CrossMode)

@@ -22,6 +22,7 @@ extern const uint8_t gFontDWR[3][6];
     extern const uint8_t gFontRO[2][6];
 #endif
 extern const uint8_t gFontHold[2][5];
+extern const uint8_t gFontINV[3][6];
 
 extern const uint8_t BITMAP_BatteryLevel[2];
 extern const uint8_t BITMAP_BatteryLevel1[17];

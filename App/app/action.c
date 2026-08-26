@@ -29,6 +29,7 @@
     #include "app/fm.h"
 #endif
 #include "app/scanner.h"
+#include "app/splitrx.h"
 #include "audio.h"
 #ifdef ENABLE_FMRADIO
     #include "driver/bk1080.h"
@@ -173,6 +174,7 @@ void (*action_opt_table[])(void) = {
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
     [ACTION_OPT_RXTX_LOG] = &ACTION_RxTxLog,
 #endif
+    [ACTION_OPT_INV_TRACK] = &SPLITRX_ToggleInv,
 };
 
 static_assert(ARRAY_SIZE(action_opt_table) == ACTION_OPT_LEN);
@@ -682,6 +684,13 @@ void ACTION_RxMode(void)
 {
     static bool cycle = 0;
 
+    // Dual watch and crossband are mutually exclusive with the fifth RxMode,
+    // which owns the VFO role pointers. Refuse rather than build a bad mix.
+    if (SPLITRX_IsEnabled()) {
+        gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+        return;
+    }
+
     if (cycle) {
         gEeprom.CROSS_BAND_RX_TX = !gEeprom.CROSS_BAND_RX_TX;
     } else {
@@ -697,6 +706,12 @@ void ACTION_MainOnly(void)
     static bool cycle = 0;
     static uint8_t dw = 0;
     static uint8_t cb = 0;
+
+    // Already effectively main-only, and toggling would corrupt the role state.
+    if (SPLITRX_IsEnabled()) {
+        gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+        return;
+    }
 
     if (cycle) {
         gEeprom.DUAL_WATCH = dw;

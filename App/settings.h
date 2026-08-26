@@ -200,6 +200,7 @@ enum ACTION_OPT_t {
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
     ACTION_OPT_RXTX_LOG,
 #endif
+    ACTION_OPT_INV_TRACK,
     ACTION_OPT_LEN
 };
 
@@ -283,6 +284,10 @@ typedef struct {
     bool                  VFO_OPEN;
     uint8_t               DUAL_WATCH;
     uint8_t               CROSS_BAND_RX_TX;
+    // Fifth RxMode: the user-selected MAIN VFO always receives while the other
+    // VFO owns transmission (linear satellite transponder work). Persisted in
+    // the CW block at 0x0F20, State[5] -- a byte upstream marks as unused.
+    bool                  MAIN_RX_SUB_TX;
     uint8_t               BATTERY_SAVE;
     uint8_t               BACKLIGHT_TIME;
     uint8_t               SCAN_RESUME_MODE;

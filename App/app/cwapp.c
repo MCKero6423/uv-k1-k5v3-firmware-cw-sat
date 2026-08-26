@@ -25,6 +25,7 @@
 #include "app/cwmacro.h"
 #include "app/app.h"
 #include "app/menu.h"
+#include "app/splitrx.h"
 #include "audio.h"
 #include "driver/bk4819.h"
 #include "driver/bk4819-regs.h"
@@ -76,7 +77,10 @@ void CW_EndTxNow(void)
 // ---------------------------------------------------------------------------
 void CW_AppUpdate(void)
 {
-	if (!(gTxVfo->Modulation == MODULATION_CW
+	// Transmit-role VFO, not gTxVfo: in the fifth RxMode (MAIN RX / SUB TX) the
+	// idle gTxVfo is MAIN (the USB downlink) while SUB carries the CW uplink.
+	// Reading gTxVfo here would tear down CW TX on every 1 ms tick.
+	if (!(SPLITRX_GetTransmitRoleVfo()->Modulation == MODULATION_CW
 #ifdef ENABLE_CODE_PRACTICE
 		|| gCW_CpoActive
 #endif

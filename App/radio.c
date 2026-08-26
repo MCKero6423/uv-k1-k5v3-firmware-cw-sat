@@ -20,6 +20,7 @@
 #include "am_fix.h"
 #include "app/cwkeyer.h"
 #include "app/dtmf.h"
+#include "app/splitrx.h"
 #ifdef ENABLE_FEAT_F4HWN_RXTX_LOG
     #include "app/rxtx_log.h"
 #endif
@@ -788,6 +789,10 @@ void RADIO_ApplyOffset(VFO_Info_t *pInfo)
 
 static void RADIO_SelectCurrentVfo(void)
 {
+    if (SPLITRX_IsTxActive()) {
+        gCurrentVfo = gTxVfo;
+        return;
+    }
     // if crossband is active and DW not the gCurrentVfo is gTxVfo (gTxVfo/TX_VFO is only ever changed by the user)
     // otherwise it is set to gRxVfo which is set to gTxVfo in RADIO_SelectVfos
     // so in the end gCurrentVfo is equal to gTxVfo unless dual watch changes it on incomming transmition (again, this can only happen when XB off)
@@ -797,19 +802,29 @@ static void RADIO_SelectCurrentVfo(void)
 
 void RADIO_SelectVfos(void)
 {
-    // if crossband without DW is used then RX_VFO is the opposite to the TX_VFO
-    gEeprom.RX_VFO = (gEeprom.CROSS_BAND_RX_TX == CROSS_BAND_OFF || gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) ? gEeprom.TX_VFO : !gEeprom.TX_VFO;
+    if (!SPLITRX_SelectRoleVfos()) {
+        // if crossband without DW is used then RX_VFO is the opposite to the TX_VFO
+        gEeprom.RX_VFO = (gEeprom.CROSS_BAND_RX_TX == CROSS_BAND_OFF || gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) ? gEeprom.TX_VFO : !gEeprom.TX_VFO;
 
-    gTxVfo = &gEeprom.VfoInfo[gEeprom.TX_VFO];
-    gRxVfo = &gEeprom.VfoInfo[gEeprom.RX_VFO];
+        gTxVfo = &gEeprom.VfoInfo[gEeprom.TX_VFO];
+        gRxVfo = &gEeprom.VfoInfo[gEeprom.RX_VFO];
+    }
 
     #ifdef ENABLE_CW_MODULATOR
     // Set gMonitor default for CW and USB/SSB: open squelch by default.
     // CW_KeyerReconfigure is always called (false = deactivate when not CW).
-    CW_KeyerReconfigure(gTxVfo->Modulation == MODULATION_CW);
+    // Keyed off the transmit-role VFO: in the fifth RxMode the idle gTxVfo is
+    // MAIN (the USB downlink), while SUB is the one that will key CW uplink.
+    CW_KeyerReconfigure(SPLITRX_GetTransmitRoleVfo()->Modulation == MODULATION_CW);
     gMonitor = (gRxVfo->Modulation == MODULATION_CW ||
                 gRxVfo->Modulation == MODULATION_USB);
 #endif
+
+    // Satellite downlinks sit at or below the noise floor, so squelch must never
+    // gate them. Forced on regardless of the MAIN modulation (the CW/USB rule
+    // above would leave an FM downlink squelched).
+    if (SPLITRX_IsEnabled())
+        gMonitor = true;
 
     RADIO_SelectCurrentVfo();
 }
@@ -1132,7 +1147,10 @@ void RADIO_SetTxParameters(void)
 
 	uint32_t tx_frequency = gCurrentVfo->pTX->Frequency;
 #ifdef ENABLE_CW_MODULATOR
-	if (gTxVfo->Modulation == MODULATION_CW && gCW_CrossMode) {
+	// Cross mode keys CW as an audio tone through the SSB path, which puts the
+	// carrier a tone-width off frequency. A linear transponder needs true keyed
+	// carrier, so the fifth RxMode never takes the cross-mode offset.
+	if (gTxVfo->Modulation == MODULATION_CW && gCW_CrossMode && !SPLITRX_IsEnabled()) {
 		tx_frequency += gEeprom.CW_TONE_FREQUENCY;
 	}
 #endif
@@ -1353,6 +1371,7 @@ void RADIO_SetVfoState(VfoState_t State)
 void RADIO_PrepareTX(void)
 {
     VfoState_t State = VFO_STATE_NORMAL;  // default to OK to TX
+    SPLITRX_BeginTx();  // hands gTxVfo to SUB before any check reads it
 
     if (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF)
     {   // dual-RX is enabled
@@ -1431,6 +1450,7 @@ void RADIO_PrepareTX(void)
         gDTMF_ReplyState = DTMF_REPLY_NONE;
 #endif
         AUDIO_PlayBeep(BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL);
+        SPLITRX_EndTx();  // rejected: give the role pointers back to MAIN RX
         return;
     }
 
@@ -1542,6 +1562,11 @@ void RADIO_PrepareCssTX(void)
     SYSTEM_DelayMs(200);
 
     RADIO_SendCssTail();
+    // This path returns to RX through RADIO_SetupRegisters instead of
+    // APP_EndTransmission, so release the split-mode role pointers here or
+    // tx_active would stay latched and block reception.
+    SPLITRX_EndTx();
+    SPLITRX_ApplyPendingInv();
     RADIO_SetupRegisters(true);
 }
 

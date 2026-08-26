@@ -25,6 +25,7 @@ target_sources(App INTERFACE
     app/main.c
     app/menu.c
     app/scanner.c
+    app/splitrx.c
     audio.c
     bitmaps.c
     board.c

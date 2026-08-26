@@ -1,4 +1,5 @@
 #include "app/chFrScanner.h"
+#include "app/splitrx.h"
 #include "audio.h"
 #include "functions.h"
 #include "misc.h"
@@ -25,6 +26,11 @@ void COMMON_KeypadLockToggle()
 
 void COMMON_SwitchVFOs()
 {
+    // Swapping TX_VFO mid-transmission would re-derive the MAIN/SUB roles the
+    // other way round and move the live carrier onto the receive frequency.
+    if (SPLITRX_IsTxActive())
+        return;
+
 #ifdef ENABLE_SCAN_RANGES    
     gScanRangeStart = 0;
 #endif

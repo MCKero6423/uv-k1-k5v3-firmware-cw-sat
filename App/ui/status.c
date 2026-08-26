@@ -25,6 +25,7 @@
     #include "app/fm.h"
 #endif
 #include "app/scanner.h"
+#include "app/splitrx.h"
 #include "bitmaps.h"
 #include "driver/keyboard.h"
 #include "driver/st7565.h"
@@ -214,7 +215,12 @@ void UI_DisplayStatus()
                 {
                     uint8_t xb = (gEeprom.CROSS_BAND_RX_TX != CROSS_BAND_OFF);
 
-                    if (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) {
+                    if (SPLITRX_IsInvEnabled()) {
+                        // Fifth RxMode with inverse tracking armed.
+                        src = gFontINV;
+                        sSize = sizeof(gFontINV);
+                        sOff = 0;
+                    } else if (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) {
                         if (gDualWatchActive) { // DWR - dual watch + respond
                             src = gFontDWR;
                             sOff = xb ? 2 : 0;

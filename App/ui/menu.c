@@ -259,7 +259,8 @@ const char* const gSubMenu_RXMode[] =
     "MAIN\nONLY",       // TX and RX on main only
     "DUAL RX\nRESPOND", // Watch both and respond
     "CROSS\nBAND",      // TX on main, RX on secondary
-    "MAIN TX\nDUAL RX"  // always TX on main, but RX on both
+    "MAIN TX\nDUAL RX", // always TX on main, but RX on both
+    "MAIN RX\nSUB TX"   // RX on main, TX on secondary (linear satellite)
 };
 
 #ifdef ENABLE_VOICE
@@ -560,6 +561,7 @@ const t_sidefunction gSubMenu_SIDEFUNCTIONS[] =
         {"RF LOG",          ACTION_OPT_RXTX_LOG},
     #endif
 #endif
+    {"INV\nTRACK",      ACTION_OPT_INV_TRACK},
 };
 
 const uint8_t gSubMenu_SIDEFUNCTIONS_size = ARRAY_SIZE(gSubMenu_SIDEFUNCTIONS);

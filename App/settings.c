@@ -397,8 +397,19 @@ gEeprom.FreqChannel[1]   = IS_FREQ_CHANNEL(Data16[5]) ? Data16[5] : (FREQ_CHANNE
     gSetting_350EN             = (Data[5] < 2) ? Data[5] : true;
 #ifdef ENABLE_FEAT_F4HWN
     gSetting_ScrambleEnable    = false;
+    // Data[6] bit 1: fifth RxMode (MAIN RX / SUB TX), guarded by a 0xA
+    // signature in the upper nibble. Erased cells (0xFF) and legacy scrambler
+    // values written by other forks (0x00/0x01) therefore read as disabled,
+    // which is also the default for a fresh install.
+    gEeprom.MAIN_RX_SUB_TX     = ((Data[6] & 0xF0) == 0xA0) && ((Data[6] & 0x02) != 0);
+    if (gEeprom.MAIN_RX_SUB_TX) {
+        // This mode owns the role pointers exclusively.
+        gEeprom.DUAL_WATCH       = DUAL_WATCH_OFF;
+        gEeprom.CROSS_BAND_RX_TX = CROSS_BAND_OFF;
+    }
 #else
     gSetting_ScrambleEnable    = (Data[6] < 2) ? Data[6] : true;
+    gEeprom.MAIN_RX_SUB_TX     = false;  // byte owned by the scrambler setting
 #endif
 
     //gSetting_TX_EN             = (Data[7] & (1u << 0)) ? true : false;
@@ -1116,7 +1127,11 @@ void SETTINGS_SaveSettings(void)
 #endif
     State[5]  = gSetting_350EN;
 #ifdef ENABLE_FEAT_F4HWN
-    State[6]  = false;
+    // Upstream writes a literal false here (scrambler is gone in F4HWN builds),
+    // so the byte is free above bit 0. Bits 7..4 carry a 0xA signature so a
+    // legacy gSetting_ScrambleEnable value (0/1) from another fork is never
+    // mistaken for our flag; bit 1 is the fifth RxMode itself.
+    State[6]  = 0xA0 | (gEeprom.MAIN_RX_SUB_TX ? 0x02 : 0x00);
 #else
     State[6]  = gSetting_ScrambleEnable;
 #endif

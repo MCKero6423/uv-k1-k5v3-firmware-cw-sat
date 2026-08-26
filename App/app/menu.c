@@ -28,6 +28,7 @@
 #include "app/generic.h"
 #include "app/menu.h"
 #include "app/scanner.h"
+#include "app/splitrx.h"
 #include "audio.h"
 #include "board.h"
 #include "driver/backlight.h"
@@ -735,8 +736,12 @@ void MENU_AcceptSetting(void)
             break;
 
         case MENU_TDR:
-            gEeprom.DUAL_WATCH = (gEeprom.TX_VFO + 1) * (gSubMenuSelection & 1);
-            gEeprom.CROSS_BAND_RX_TX = (gEeprom.TX_VFO + 1) * ((gSubMenuSelection & 2) > 0);
+            // Selection 4 is the fifth RxMode; it clears DW/XB itself.
+            SPLITRX_SetMode(gSubMenuSelection == 4);
+            if (gSubMenuSelection < 4) {
+                gEeprom.DUAL_WATCH = (gEeprom.TX_VFO + 1) * (gSubMenuSelection & 1);
+                gEeprom.CROSS_BAND_RX_TX = (gEeprom.TX_VFO + 1) * ((gSubMenuSelection & 2) > 0);
+            }
 
             #ifdef ENABLE_FEAT_F4HWN
                 gDW = gEeprom.DUAL_WATCH;
@@ -1367,7 +1372,8 @@ void MENU_ShowCurrentSetting(void)
             break;
 
         case MENU_TDR:
-            gSubMenuSelection = (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) + (gEeprom.CROSS_BAND_RX_TX != CROSS_BAND_OFF) * 2;
+            gSubMenuSelection = gEeprom.MAIN_RX_SUB_TX ? 4 :
+                (gEeprom.DUAL_WATCH != DUAL_WATCH_OFF) + (gEeprom.CROSS_BAND_RX_TX != CROSS_BAND_OFF) * 2;
             break;
 
         case MENU_BEEP:

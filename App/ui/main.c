@@ -20,6 +20,7 @@
 #include "app/app.h"
 #include "app/chFrScanner.h"
 #include "app/dtmf.h"
+#include "app/splitrx.h"
 
 #ifdef ENABLE_FEAT_F4HWN_BEAM
     #include "app/beam.h"
@@ -68,6 +69,11 @@ center_line_t center_line = CENTER_LINE_NONE;
 
     static bool isMainOnly()
     {
+        // The fifth RxMode needs both VFOs visible: MAIN shows the downlink
+        // being received while SUB shows the uplink that will be transmitted.
+        if (SPLITRX_IsEnabled())
+            return false;
+
         return (gEeprom.DUAL_WATCH == DUAL_WATCH_OFF) && (gEeprom.CROSS_BAND_RX_TX == CROSS_BAND_OFF);
     }
 #endif
@@ -1323,7 +1329,12 @@ void UI_DisplayMain(void)
     UI_DisplayUnlockKeyboard(isMainOnly() ? 5 : 3);
 #endif
 
-    unsigned int activeTxVFO = gRxVfoIsActive ? gEeprom.RX_VFO : gEeprom.TX_VFO;
+    // In MAIN RX / SUB TX mode the persistent TX_VFO remains the user's MAIN.
+    // Use the temporary role state for the TX marker/frequency so the display
+    // confirms the same SUB VFO that the RF path is actually using.
+    unsigned int activeTxVFO = SPLITRX_IsTxActive()
+        ? (gEeprom.TX_VFO ^ 1u)
+        : (gRxVfoIsActive ? gEeprom.RX_VFO : gEeprom.TX_VFO);
 
     for (unsigned int vfo_num = 0; vfo_num < 2; vfo_num++)
     {

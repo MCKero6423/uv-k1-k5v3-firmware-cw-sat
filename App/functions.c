@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include "app/dtmf.h"
+#include "app/splitrx.h"
 #if defined(ENABLE_FMRADIO)
     #include "app/fm.h"
 #endif
@@ -95,7 +96,9 @@ void FUNCTION_Init(void)
 void FUNCTION_Foreground(const FUNCTION_Type_t PreviousFunction)
 {
 #ifdef ENABLE_DTMF_CALLING
-    if (gDTMF_ReplyState != DTMF_REPLY_NONE)
+    // DTMF tones are not needed during satellite work and the CSS tail
+    // returns through a path that bypasses APP_EndTransmission.
+    if (gDTMF_ReplyState != DTMF_REPLY_NONE && !SPLITRX_IsEnabled())
         RADIO_PrepareCssTX();
 #endif
 
