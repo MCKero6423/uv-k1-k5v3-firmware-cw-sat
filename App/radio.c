@@ -1438,6 +1438,10 @@ void RADIO_PrepareTX(void)
     #endif
     #endif
 
+    // Satellite mode demands a true keyed CW uplink; refuse if SUB is not CW.
+    if (SPLITRX_TxBlockedNotCw())
+        State = VFO_STATE_TX_DISABLE;
+
     if (State != VFO_STATE_NORMAL) {
         // TX not allowed
         RADIO_SetVfoState(State);

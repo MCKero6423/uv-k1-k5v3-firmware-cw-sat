@@ -35,6 +35,10 @@ void SPLITRX_SetMode(bool enabled);
 void SPLITRX_ToggleInv(void);
 void SPLITRX_ApplyPendingInv(void);
 
+// True when the mode is enabled but SUB is not set to CW. A linear transponder
+// uplink must be true keyed carrier, so transmission is refused in that case.
+bool SPLITRX_TxBlockedNotCw(void);
+
 // Atomically changes MAIN and, when INV is on, applies the opposite delta to
 // SUB. Returns false without changing either VFO when the pair is illegal.
 bool SPLITRX_TuneMainFrequency(uint32_t frequency);

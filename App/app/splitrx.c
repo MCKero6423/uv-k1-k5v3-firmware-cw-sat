@@ -95,6 +95,13 @@ void SPLITRX_SetMode(const bool enabled)
         // A linear transponder needs true keyed carrier, never CW-as-SSB-tone.
         gCW_CrossMode = false;
 #endif
+        // A repeater shift on SUB would put the uplink somewhere other than the
+        // frequency shown, and inverse tracking assumes displayed == radiated.
+        VFO_Info_t *const sub = SPLITRX_GetSubVfo();
+        if (sub->TX_OFFSET_FREQUENCY_DIRECTION != TX_OFFSET_FREQUENCY_DIRECTION_OFF) {
+            sub->TX_OFFSET_FREQUENCY_DIRECTION = TX_OFFSET_FREQUENCY_DIRECTION_OFF;
+            RADIO_ApplyOffset(sub);
+        }
         SPLITRX_SelectRoleVfos();
     }
     gUpdateStatus = true;
@@ -128,6 +135,19 @@ void SPLITRX_ApplyPendingInv(void)
     inv_enabled   = gEeprom.MAIN_RX_SUB_TX && inv_pending_value;
     inv_pending   = false;
     gUpdateStatus = true;
+}
+
+bool SPLITRX_TxBlockedNotCw(void)
+{
+#ifdef ENABLE_CW_MODULATOR
+    // A linear transponder uplink has to be true keyed carrier. SSB/FM on SUB
+    // would radiate a wideband signal through the transponder passband, so
+    // refuse instead of transmitting the wrong thing.
+    return gEeprom.MAIN_RX_SUB_TX &&
+           SPLITRX_GetSubVfo()->Modulation != MODULATION_CW;
+#else
+    return false;
+#endif
 }
 
 bool SPLITRX_TuneMainFrequency(const uint32_t frequency)
