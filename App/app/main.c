@@ -673,6 +673,22 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 Frequency = frequencyBandTable[BAND_N_ELEM - 1].upper;
             }
 
+            Frequency = FREQUENCY_RoundToStep(Frequency, gTxVfo->StepFrequency);
+
+            if (Frequency >= BX4819_band1.upper && Frequency < BX4819_band2.lower)
+            {   // clamp the frequency to the limit
+                const uint32_t center = (BX4819_band1.upper + BX4819_band2.lower) / 2;
+                Frequency = (Frequency < center) ? BX4819_band1.upper - gTxVfo->StepFrequency : BX4819_band2.lower;
+            }
+
+            // Tune before touching the band: SPLITRX_TuneMainFrequency can
+            // refuse (INV tracking may have no legal SUB counterpart), and the
+            // band switch below already persists channel indices to EEPROM.
+            if (!SPLITRX_TuneMainFrequency(Frequency)) {
+                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
+                return;
+            }
+
             const FREQUENCY_Band_t band = FREQUENCY_GetBand(Frequency);
 
             if (gTxVfo->Band != band) {
@@ -683,19 +699,8 @@ static void MAIN_Key_DIGITS(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
                 SETTINGS_SaveVfoIndices();
 
                 RADIO_ConfigureChannel(Vfo, VFO_CONFIGURE_RELOAD);
-            }
-
-            Frequency = FREQUENCY_RoundToStep(Frequency, gTxVfo->StepFrequency);
-
-            if (Frequency >= BX4819_band1.upper && Frequency < BX4819_band2.lower)
-            {   // clamp the frequency to the limit
-                const uint32_t center = (BX4819_band1.upper + BX4819_band2.lower) / 2;
-                Frequency = (Frequency < center) ? BX4819_band1.upper - gTxVfo->StepFrequency : BX4819_band2.lower;
-            }
-
-            if (!SPLITRX_TuneMainFrequency(Frequency)) {
-                gBeepToPlay = BEEP_500HZ_60MS_DOUBLE_BEEP_OPTIONAL;
-                return;
+                // Reloading the destination band replaces its stored frequency.
+                gTxVfo->freq_config_RX.Frequency = Frequency;
             }
 
             gRequestSaveChannel = 1;
