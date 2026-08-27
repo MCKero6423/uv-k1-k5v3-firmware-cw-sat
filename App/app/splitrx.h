@@ -42,6 +42,20 @@ void SPLITRX_ApplyPendingInv(void);
 // uplink must be true keyed carrier, so transmission is refused in that case.
 bool SPLITRX_TxBlockedNotCw(void);
 
+// Single source of truth for the two values that several call sites used to
+// recompute independently (and therefore inconsistently):
+//
+//   SPLITRX_KeyerShouldBeArmed() -- the CW keyer follows the transmit-role VFO,
+//   which is SUB in this mode while the idle gTxVfo still points at MAIN.
+//   Recomputing it from gTxVfo tears the keyer down as soon as MAIN is USB.
+//
+//   SPLITRX_MonitorShouldBeOpen() -- satellite downlinks sit at the noise floor,
+//   so the squelch must stay open regardless of the MAIN modulation.
+//
+// Both collapse to the stock expressions when the mode is off.
+bool SPLITRX_KeyerShouldBeArmed(void);
+bool SPLITRX_MonitorShouldBeOpen(void);
+
 // Atomically changes MAIN and, when INV is on, applies the opposite delta to
 // SUB. Returns false without changing either VFO when the pair is illegal.
 bool SPLITRX_TuneMainFrequency(uint32_t frequency);

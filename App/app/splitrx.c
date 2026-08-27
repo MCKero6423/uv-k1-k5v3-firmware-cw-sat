@@ -169,6 +169,34 @@ bool SPLITRX_TxBlockedNotCw(void)
 #endif
 }
 
+bool SPLITRX_KeyerShouldBeArmed(void)
+{
+#ifdef ENABLE_CW_MODULATOR
+    // Transmit-role VFO, never gTxVfo: in this mode the idle gTxVfo is MAIN (the
+    // downlink, typically USB) while SUB carries the CW uplink. Several call
+    // sites used to recompute this from gTxVfo and disarmed the keyer.
+    return SPLITRX_GetTransmitRoleVfo()->Modulation == MODULATION_CW;
+#else
+    return false;
+#endif
+}
+
+bool SPLITRX_MonitorShouldBeOpen(void)
+{
+    // A satellite downlink sits at or below the noise floor, so the squelch must
+    // never gate it -- whatever MAIN's modulation happens to be.
+    if (gEeprom.MAIN_RX_SUB_TX)
+        return true;
+
+#ifdef ENABLE_CW_MODULATOR
+    // Stock rule otherwise: CW and USB default to an open squelch.
+    return gRxVfo->Modulation == MODULATION_CW ||
+           gRxVfo->Modulation == MODULATION_USB;
+#else
+    return false;
+#endif
+}
+
 bool SPLITRX_TuneMainFrequency(const uint32_t frequency)
 {
     VFO_Info_t *const main = SPLITRX_GetMainVfo();

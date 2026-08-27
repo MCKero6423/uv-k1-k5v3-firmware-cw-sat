@@ -815,16 +815,10 @@ void RADIO_SelectVfos(void)
     // CW_KeyerReconfigure is always called (false = deactivate when not CW).
     // Keyed off the transmit-role VFO: in the fifth RxMode the idle gTxVfo is
     // MAIN (the USB downlink), while SUB is the one that will key CW uplink.
-    CW_KeyerReconfigure(SPLITRX_GetTransmitRoleVfo()->Modulation == MODULATION_CW);
-    gMonitor = (gRxVfo->Modulation == MODULATION_CW ||
-                gRxVfo->Modulation == MODULATION_USB);
+    CW_KeyerReconfigure(SPLITRX_KeyerShouldBeArmed());
 #endif
 
-    // Satellite downlinks sit at or below the noise floor, so squelch must never
-    // gate them. Forced on regardless of the MAIN modulation (the CW/USB rule
-    // above would leave an FM downlink squelched).
-    if (SPLITRX_IsEnabled())
-        gMonitor = true;
+    gMonitor = SPLITRX_MonitorShouldBeOpen();
 
     RADIO_SelectCurrentVfo();
 }

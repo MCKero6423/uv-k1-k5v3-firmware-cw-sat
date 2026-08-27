@@ -16,7 +16,10 @@
 
 // Code practice (CPO) app skeleton
 
+#include <stddef.h>
+
 #include "app/cpo.h"
+#include "app/splitrx.h"
 #include "audio.h"
 #include "driver/backlight.h"
 #include "driver/bk4819.h"
@@ -43,6 +46,8 @@ bool wpm_changed = false;
 static bool s_flashlight_sending = false;
 #ifdef ENABLE_CW_MODULATOR
 static ModulationMode_t s_saved_modulation = MODULATION_CW;
+// VFO the modulation was borrowed from, so CPO_Exit restores the same one.
+static VFO_Info_t      *s_cpo_vfo;
 #endif
 
 void CPO_Enter(void)
@@ -57,8 +62,12 @@ void CPO_Enter(void)
 	// one back in CPO_Exit. This is what lets practice work from FM/AM/USB. The
 	// borrowed value cannot reach EEPROM: only gRequestSaveChannel persists
 	// Modulation, and ProcessKey routes every key to CPO_ProcessKeys while active.
-	s_saved_modulation = gTxVfo->Modulation;
-	gTxVfo->Modulation = MODULATION_CW;
+	// Borrow from the transmit-role VFO: in the fifth RxMode that is SUB, and
+	// touching MAIN's modulation instead would retune the live downlink for the
+	// duration of the practice session.
+	s_cpo_vfo = SPLITRX_GetTransmitRoleVfo();
+	s_saved_modulation = s_cpo_vfo->Modulation;
+	s_cpo_vfo->Modulation = MODULATION_CW;
 #endif
 
 	// Set this before touching the radio: CheckRadioInterrupts bails out on it, so
@@ -119,7 +128,11 @@ void CPO_Exit(void)
 #ifdef ENABLE_CW_MODULATOR
 	// Hand back the modulation CPO_Enter borrowed; the reconfigure below applies it
 	// and drops the keyer's claim on PTT if we are no longer in CW.
-	gTxVfo->Modulation = s_saved_modulation;
+	// Same VFO CPO_Enter borrowed from, even if the roles moved meanwhile.
+	if (s_cpo_vfo != NULL) {
+		s_cpo_vfo->Modulation = s_saved_modulation;
+		s_cpo_vfo = NULL;
+	}
 #endif
 	// Leave the monitor state CPO_Enter parked in. The reconfigure below ends with
 	// `if (gMonitor) ACTION_Monitor()`, and ACTION_Monitor toggles: called while

@@ -354,11 +354,11 @@ void ACTION_SwitchDemodul(void)
 #ifdef ENABLE_CW_MODULATOR
 	// Arm/dearm keyer ownership immediately so a very quick PTT press after
 	// switching to CW cannot beat deferred reconfigure/save paths.
-	CW_KeyerReconfigure(gTxVfo->Modulation == MODULATION_CW);
+	CW_KeyerReconfigure(SPLITRX_KeyerShouldBeArmed());
 
 	// CW/USB default to monitor mode (open squelch); other modes start squelched.
-	gMonitor = (gTxVfo->Modulation == MODULATION_CW ||
-	            gTxVfo->Modulation == MODULATION_USB);
+	// Via splitrx so the fifth RxMode keeps the squelch open for its downlink.
+	gMonitor = SPLITRX_MonitorShouldBeOpen();
 
 	// Reconfigure radio path now (not only on later key release/save handling).
 	gFlagReconfigureVfos = true;

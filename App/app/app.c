@@ -2748,9 +2748,12 @@ Skip:
         RADIO_SelectVfos();
 
 #ifdef ENABLE_CW_MODULATOR
-		CW_KeyerReconfigure(gTxVfo->Modulation==MODULATION_CW);
-		gMonitor = (gRxVfo->Modulation == MODULATION_CW ||
-		            gRxVfo->Modulation == MODULATION_USB);
+		// Both via splitrx: this block runs right after RADIO_SelectVfos() and
+		// used to recompute them from gTxVfo/gRxVfo, undoing the role-aware
+		// values that call had just installed. Every gFlagReconfigureVfos path
+		// (14 of them, including entering the mode from the RxMode menu) hit it.
+		CW_KeyerReconfigure(SPLITRX_KeyerShouldBeArmed());
+		gMonitor = SPLITRX_MonitorShouldBeOpen();
 #endif
 
 #ifdef ENABLE_NOAA
