@@ -1162,8 +1162,9 @@ void MENU_AcceptSetting(void)
 			uint8_t macroIdx = UI_MENU_GetCurrentMenuId() - MENU_CW_MSG1;
 			// If gSubMenuSelection == 1, user selected "record new"
 			if (gSubMenuSelection == 1) {
-				// Check if we're in CW mode
-				if (gTxVfo->Modulation != MODULATION_CW) {
+				// Check the transmit-role VFO, not gTxVfo: in the fifth RxMode
+				// the idle gTxVfo is MAIN (the USB downlink) while SUB carries CW.
+				if (SPLITRX_GetTransmitRoleVfo()->Modulation != MODULATION_CW) {
 					// Not in CW mode - can't use keyer for recording
 					gCwNoKeyerError = true;
 					gRequestDisplayScreen = DISPLAY_MENU;
@@ -1176,8 +1177,9 @@ void MENU_AcceptSetting(void)
 			}
 			// If gSubMenuSelection == 2, user selected "play", 3 is "repeat"
 			else if (gSubMenuSelection == 2 || gSubMenuSelection == 3) {
-				// Check if we're in CW mode (playback requires CW mode active)
-				if (gTxVfo->Modulation != MODULATION_CW) {
+				// Check if we're in CW mode (playback requires CW mode active).
+				// Transmit-role VFO: SUB owns CW in the fifth RxMode.
+				if (SPLITRX_GetTransmitRoleVfo()->Modulation != MODULATION_CW) {
 					gCwNoKeyerError = true;
 					gSubMenuSelection = 0; // Reset selection to "show"
 					gRequestDisplayScreen = DISPLAY_MENU;
@@ -2210,8 +2212,9 @@ static void MENU_Key_MENU(const bool bKeyPressed, const bool bKeyHeld)
 			if ((UI_MENU_GetCurrentMenuId() >= MENU_CW_MSG1 && UI_MENU_GetCurrentMenuId() <= MENU_CW_MSG4)
 			    && gSubMenuSelection == 1)
 			{
-				// User is confirming "record new?" - check if we're in CW mode
-				if (gTxVfo->Modulation != MODULATION_CW) {
+				// User is confirming "record new?" - check the transmit-role VFO,
+				// which is SUB in the fifth RxMode.
+				if (SPLITRX_GetTransmitRoleVfo()->Modulation != MODULATION_CW) {
 					// Not in CW mode - can't use keyer for recording
 					gCwNoKeyerError = true;
 					gFlagAcceptSetting = false;  // Don't accept the setting

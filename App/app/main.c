@@ -276,7 +276,9 @@ static void processFKeyFunction(const KEY_Code_t Key, const bool beep)
             } else {
 #endif
 #ifdef ENABLE_CW_MODULATOR
-                if (gTxVfo->Modulation == MODULATION_CW) {
+                // Transmit-role VFO: SUB owns CW in the fifth RxMode, so this
+                // shortcut must stay reachable while MAIN sits on USB.
+                if (SPLITRX_GetTransmitRoleVfo()->Modulation == MODULATION_CW) {
                     gEeprom.CW_BREAKIN_ENABLE = !gEeprom.CW_BREAKIN_ENABLE;
                     gRequestSaveSettings = true;
                     gUpdateStatus        = true;
