@@ -23,6 +23,7 @@
 #ifdef ENABLE_FMRADIO
     #include "app/fm.h"
 #endif
+#include "app/splitrx.h"
 #include "app/uart.h"
 #include "board.h"
 #include "py32f071_ll_dma.h"
@@ -559,7 +560,12 @@ static void CMD_052F(uint32_t Port, const uint8_t *pBuffer)
 
     gEeprom.DUAL_WATCH                               = DUAL_WATCH_OFF;
     gEeprom.CROSS_BAND_RX_TX                         = CROSS_BAND_OFF;
-    gEeprom.RX_VFO                                   = 0;
+    // RX_VFO belongs to the fifth RxMode while it is active (it must track
+    // TX_VFO so MAIN keeps receiving). Nothing restores this value when the
+    // serial session ends, so pinning it to 0 here would leave the radio
+    // listening on the wrong VFO whenever MAIN is VFO B.
+    if (!SPLITRX_IsEnabled())
+        gEeprom.RX_VFO                               = 0;
     gEeprom.DTMF_SIDE_TONE                           = false;
     gEeprom.VfoInfo[0].FrequencyReverse              = false;
     gEeprom.VfoInfo[0].pRX                           = &gEeprom.VfoInfo[0].freq_config_RX;
