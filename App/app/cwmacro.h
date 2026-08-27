@@ -36,16 +36,34 @@
 #define CW_MACRO_SIG 0x80
 #define CW_MACRO_CHECKSUM_OFFSET (CW_MACRO_BLOCK_SIZE - 1)
 
-// EEPROM addresses for macros (each uses CW_MACRO_BLOCK_SIZE bytes)
-// We reuse the DTMF contacts region (0x1C00..0x1CFF), DTMF calling must be disabled
-#if defined(ENABLE_DTMF_CALLING) && defined(ENABLE_CW_MODULATOR)
-#error "ENABLE_DTMF_CALLING and ENABLE_CW_MODULATOR both enabled; CW macros overlap DTMF contacts (0x1C00). Disable one or change CW macro base."
-#endif
+// EEPROM addresses for macros (each uses CW_MACRO_BLOCK_SIZE bytes).
+//
+// The UV-K5 V1 firmware put these at 0x1C00, inside its DTMF contacts region.
+// That address is not spare on this base: driver/eeprom_compat.c maps
+// 0x001000..0x002000 to the second bank of MR channel frequencies, so 0x1C00
+// lands on channels #448-#459. Storing there corrupted those channels, and the
+// read-back could never satisfy the signature and checksum against channel
+// data, so every slot always reported empty -- recording appeared to do nothing.
+//
+// 0x00B000 sits in the unmapped logical gap between the settings sector
+// (ends 0x00A170) and the calibration window (starts 0x010000), and gets its own
+// mapping entry in eeprom_compat.c. The compile-time check below fails the build
+// if the block ever overlaps a mapped region again.
+#define CW_MACRO_EEPROM_BASE 0x00B000
 
-#define CW_MACRO1_EEPROM_ADDR 0x1C00
-#define CW_MACRO2_EEPROM_ADDR (CW_MACRO1_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C30 */
-#define CW_MACRO3_EEPROM_ADDR (CW_MACRO2_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C60 */
-#define CW_MACRO4_EEPROM_ADDR (CW_MACRO3_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)  /* 0x1C90 */
+#define CW_MACRO1_EEPROM_ADDR CW_MACRO_EEPROM_BASE
+#define CW_MACRO2_EEPROM_ADDR (CW_MACRO1_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)
+#define CW_MACRO3_EEPROM_ADDR (CW_MACRO2_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)
+#define CW_MACRO4_EEPROM_ADDR (CW_MACRO3_EEPROM_ADDR + CW_MACRO_BLOCK_SIZE)
+
+#define CW_MACRO_REGION_END (CW_MACRO_EEPROM_BASE + CW_MACRO_COUNT * CW_MACRO_BLOCK_SIZE)
+
+// Guard against sliding back into mapped territory. The settings sector ends at
+// 0x00A170 and the calibration window starts at 0x010000; the macro block has to
+// fit strictly between them.
+#if CW_MACRO_EEPROM_BASE < 0x00A170 || CW_MACRO_REGION_END > 0x010000
+#error "CW macro block overlaps a mapped EEPROM region (see driver/eeprom_compat.c ADDR_MAPPINGS)"
+#endif
 
 // Encoding/Decoding helper macros
 #define CW_MACRO_ENCODE(ch, hasSpace) ((hasSpace) ? ((ch) | 0x80) : (ch))

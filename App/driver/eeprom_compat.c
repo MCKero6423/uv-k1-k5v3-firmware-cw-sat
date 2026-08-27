@@ -66,6 +66,15 @@ static const AddrMapping_t ADDR_MAPPINGS[] = {
                                                 // Settings F4HWN * 8 Bytes (0x00C000)      0x00A158 -> 0x00A160
                                                 // Settings Version * 16 Bytes              0x00A160 -> 0x00A170
 
+    _MK_MAPPING(0x00B000, 0x00D000, 0x00D0C0),  // CW macros: 4 * 48 Bytes.
+                                                // Own sector on purpose. The V1
+                                                // firmware kept these at 0x1C00,
+                                                // which maps to MR channel
+                                                // frequencies on this base
+                                                // (channels #448-#459) and both
+                                                // corrupted them and made every
+                                                // read-back fail its checksum.
+
     _MK_MAPPING(0x010000, 0x00B000, 0x00B200),  // Calibration 512 Bytes!!!
 
     _MK_MAPPING(0x011000, 0x00C000, 0x00D000),  // Boot Logo sector (4 KB):
