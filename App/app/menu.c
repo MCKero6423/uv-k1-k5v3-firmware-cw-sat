@@ -2496,6 +2496,15 @@ void MENU_ProcessKeys(KEY_Code_t Key, bool bKeyPressed, bool bKeyHeld)
             GENERIC_Key_F(bKeyPressed, bKeyHeld);
             break;
         case KEY_PTT:
+#ifdef ENABLE_CW_MODULATOR
+            // The CW keyer owns PTT whenever it is active (it is the dit paddle
+            // in Buttons mode, and the straight key in handkey modes). The main
+            // key path already defers to it via gCW_KeyerManagesPtt; without the
+            // same check here the menu screen starts a real transmission instead
+            // of feeding the keyer, which makes CW macro recording impossible.
+            if (gCW_KeyerManagesPtt)
+                break;
+#endif
             GENERIC_Key_PTT(bKeyPressed);
             break;
         default:
